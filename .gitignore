@@ -1,2 +1,8 @@
 Vibe Code Project.md
 What we need to do.md
+nba/*
+backend/.venv/
+backend/__pycache__/
+backend/data/
+backend/reports/
+backend/app/__pycache__/
