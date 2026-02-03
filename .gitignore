@@ -6,3 +6,6 @@ backend/__pycache__/
 backend/data/
 backend/reports/
 backend/app/__pycache__/
+.vscode/launch.json
+backend/.env
+frontend/.env
