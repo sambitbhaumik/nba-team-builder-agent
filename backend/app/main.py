@@ -48,6 +48,7 @@ from .tools import (
     tool_calculate_values,
     tool_fetch_player_stats,
     tool_generate_report,
+    tool_get_cached_player_stats,
     tool_optimize_roster,
 )
 
@@ -264,10 +265,34 @@ def teams_list() -> TeamListResponse:
 @app.post("/tools/fetch-player-stats", response_model=FetchPlayerStatsResponse)
 def api_fetch_player_stats() -> FetchPlayerStatsResponse:
     """
-    Fetch player stats from NBA API.
-    This can be enhanced with LLM agent capabilities for intelligent player selection.
+    Fetch player stats from NBA API and save to cache.
+    This endpoint refreshes the player pool and their stats.
     """
     players, stats_by_id = tool_fetch_player_stats()
+    
+    player_profiles = [
+        PlayerProfileResponse(
+            player_id=p.player_id,
+            full_name=p.full_name,
+            team=p.team,
+            position=p.position,
+        )
+        for p in players
+    ]
+    
+    return FetchPlayerStatsResponse(
+        players=player_profiles,
+        stats_by_id=stats_by_id,
+    )
+
+
+@app.post("/tools/get-cached-player-stats", response_model=FetchPlayerStatsResponse)
+def api_get_cached_player_stats() -> FetchPlayerStatsResponse:
+    """
+    Get cached player stats from stored data.
+    Returns empty lists if cache doesn't exist.
+    """
+    players, stats_by_id = tool_get_cached_player_stats()
     
     player_profiles = [
         PlayerProfileResponse(
@@ -289,24 +314,34 @@ def api_fetch_player_stats() -> FetchPlayerStatsResponse:
 def api_calculate_values(request: CalculateValuesRequest) -> CalculateValuesResponse:
     """
     Calculate fantasy values for players based on stats and preferences.
-    This can be enhanced with LLM agent capabilities for intelligent value calculation.
+    Uses cached player stats if players/stats_by_id are not provided.
     """
     from .nba import PlayerProfile
     
-    # Convert PlayerProfileResponse back to PlayerProfile
-    player_profiles = [
-        PlayerProfile(
-            player_id=p.player_id,
-            full_name=p.full_name,
-            team=p.team,
-            position=p.position,
-        )
-        for p in request.players
-    ]
+    # Use cached data if players/stats not provided
+    if request.players is None or request.stats_by_id is None:
+        players, stats_by_id = tool_get_cached_player_stats()
+        if not players:
+            raise HTTPException(
+                status_code=404,
+                detail="No cached player data available. Please refresh player stats first using /tools/fetch-player-stats"
+            )
+    else:
+        # Convert PlayerProfileResponse back to PlayerProfile
+        players = [
+            PlayerProfile(
+                player_id=p.player_id,
+                full_name=p.full_name,
+                team=p.team,
+                position=p.position,
+            )
+            for p in request.players
+        ]
+        stats_by_id = request.stats_by_id
     
     valued_players = tool_calculate_values(
-        player_profiles,
-        request.stats_by_id,
+        players,
+        stats_by_id,
         request.preferences,
         request.budget,
     )
@@ -513,18 +548,11 @@ def api_optimize_roster(
     
     preferences = load_preferences()
     
-    # Call API to fetch players and stats
+    # Call API to calculate values using cached player stats
     api_base_url = os.getenv("API_BASE_URL", "http://localhost:8000")
     with httpx.Client(timeout=60.0) as client:
-        # Fetch player stats
-        fetch_response = client.post(f"{api_base_url}/tools/fetch-player-stats")
-        fetch_response.raise_for_status()
-        fetch_data = fetch_response.json()
-        
-        # Calculate values
+        # Calculate values (will use cached player stats automatically)
         calculate_request = {
-            "players": fetch_data["players"],
-            "stats_by_id": fetch_data["stats_by_id"],
             "preferences": preferences,
             "budget": budget,
         }

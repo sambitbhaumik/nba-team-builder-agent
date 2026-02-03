@@ -133,6 +133,7 @@ export default function App() {
   const [teamName, setTeamName] = useState("My Team");
   const [pendingDelete, setPendingDelete] = useState<SavedTeam | null>(null);
   const [expandedTraces, setExpandedTraces] = useState<Record<string, boolean>>({});
+  const [isRefreshingPlayers, setIsRefreshingPlayers] = useState(false);
 
   const [leftWidth, setLeftWidth] = useState(50);
   const [rightPanelVisible, setRightPanelVisible] = useState(true);
@@ -421,6 +422,33 @@ export default function App() {
     setSelectedSlotId(null);
   };
 
+  const handleRefreshPlayers = async () => {
+    if (isRefreshingPlayers) return;
+    
+    setIsRefreshingPlayers(true);
+    try {
+      const response = await fetch("http://localhost:8000/tools/fetch-player-stats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log("Player stats refreshed:", data);
+      
+      // Show success message (you could add a toast notification here)
+      alert(`Successfully refreshed player pool! Loaded ${data.players?.length || 0} players.`);
+    } catch (error) {
+      console.error("Error refreshing players:", error);
+      alert(`Error refreshing players: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setIsRefreshingPlayers(false);
+    }
+  };
+
   return (
     <div
       className="flex h-screen select-none"
@@ -435,7 +463,18 @@ export default function App() {
       >
         <header className="flex items-center justify-between border-b border-border px-5 py-4">
           <h1 className="text-lg font-semibold tracking-tight">Sport Agent</h1>
-          <Badge className="bg-primary text-primary-foreground">$150 Budget</Badge>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefreshPlayers}
+              disabled={isRefreshingPlayers}
+              className="text-xs"
+            >
+              {isRefreshingPlayers ? "Refreshing..." : "Refresh Players"}
+            </Button>
+            <Badge className="bg-primary text-primary-foreground">$150 Budget</Badge>
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">

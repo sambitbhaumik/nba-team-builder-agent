@@ -22,7 +22,7 @@ load_dotenv()
 
 # Initialize OpenAI client for OpenRouter
 client = OpenAI(
-    api_key="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",
+    api_key=os.getenv("OPENROUTER_API_KEY"),
     base_url="https://openrouter.ai/api/v1",
 )
 
@@ -197,8 +197,8 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "tool_fetch_player_stats",
-            "description": "Fetch player stats from NBA API. Returns a list of active players and their season statistics. This is useful for getting comprehensive player data before calculating values or optimizing rosters.",
+            "name": "tool_get_cached_player_stats",
+            "description": "Get cached player stats from the stored player data. This is faster than fetching from the API and should be used for regular operations. Returns a list of active players and their season statistics.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -206,11 +206,23 @@ TOOLS = [
             },
         },
     },
+    # {
+    #     "type": "function",
+    #     "function": {
+    #         "name": "tool_fetch_player_stats",
+    #         "description": "Fetch player stats from NBA API and refresh the cache. This is slow and should only be used to refresh the player pool. For regular operations, use tool_get_cached_player_stats instead.",
+    #         "parameters": {
+    #             "type": "object",
+    #             "properties": {},
+    #             "required": [],
+    #         },
+    #     },
+    # },
     {
         "type": "function",
         "function": {
             "name": "tool_calculate_values",
-            "description": "Calculate fantasy values for players based on their stats, user preferences, and budget. Requires player profiles and stats from tool_fetch_player_stats. Returns players with calculated FPG, dollar values, and scores.",
+            "description": "Calculate fantasy values for players based on their stats, user preferences, and budget. Uses cached player data automatically if players/stats_by_id are not provided. Returns players with calculated FPG, dollar values, and scores.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -225,11 +237,11 @@ TOOLS = [
                                 "position": {"type": "string"},
                             },
                         },
-                        "description": "List of player profiles from tool_fetch_player_stats",
+                        "description": "Optional: List of player profiles. If not provided, uses cached player data.",
                     },
                     "stats_by_id": {
                         "type": "object",
-                        "description": "Dictionary mapping player_id to stats dictionary from tool_fetch_player_stats",
+                        "description": "Optional: Dictionary mapping player_id to stats dictionary. If not provided, uses cached stats.",
                     },
                     "preferences": {
                         "type": "array",
@@ -241,7 +253,7 @@ TOOLS = [
                         "description": "Total budget for calculating dollar values (default 200)",
                     },
                 },
-                "required": ["players", "stats_by_id", "preferences", "budget"],
+                "required": ["preferences", "budget"],
             },
         },
     },
@@ -300,10 +312,11 @@ When building rosters:
 - Provide clear reasoning for your choices
 
 For advanced roster operations:
-- Use tool_fetch_player_stats to get comprehensive player data and statistics
-- Use tool_calculate_values to calculate fantasy values for players based on stats and preferences
+- Use tool_get_cached_player_stats to get comprehensive player data and statistics from cache (fast)
+- Use tool_fetch_player_stats only when you need to refresh the player pool (slow, should be done manually)
+- Use tool_calculate_values to calculate fantasy values for players based on stats and preferences. It automatically uses cached player data if you don't provide players/stats_by_id.
 - Use tool_optimize_roster to automatically optimize a roster from a list of valued players
-- These tools work together: fetch stats → calculate values → optimize roster
+- These tools work together: calculate values (uses cache automatically) → optimize roster
 
 Be thorough in your reasoning and explain your thought process clearly."""
 
@@ -474,13 +487,30 @@ class ReActAgent:
                     )
                 return result
 
+            elif tool_name == "tool_get_cached_player_stats":
+                # Call the API endpoint which will use cached data
+                result = self._call_api("POST", "/tools/get-cached-player-stats", json_data={})
+                if isinstance(result, dict) and "players" in result:
+                    self._add_activity(
+                        "Tool: tool_get_cached_player_stats",
+                        "success",
+                        f"Retrieved cached stats for {len(result.get('players', []))} players",
+                    )
+                else:
+                    self._add_activity(
+                        "Tool: tool_get_cached_player_stats",
+                        "error",
+                        result.get("error", "No cached data available. Please refresh player stats first."),
+                    )
+                return result
+
             elif tool_name == "tool_fetch_player_stats":
                 result = self._call_api("POST", "/tools/fetch-player-stats", json_data={})
                 if isinstance(result, dict) and "players" in result:
                     self._add_activity(
                         "Tool: tool_fetch_player_stats",
                         "success",
-                        f"Fetched stats for {len(result.get('players', []))} players",
+                        f"Fetched and cached stats for {len(result.get('players', []))} players",
                     )
                 else:
                     self._add_activity(
@@ -492,11 +522,14 @@ class ReActAgent:
 
             elif tool_name == "tool_calculate_values":
                 json_data = {
-                    "players": arguments.get("players", []),
-                    "stats_by_id": arguments.get("stats_by_id", {}),
                     "preferences": arguments.get("preferences", []),
                     "budget": arguments.get("budget", budget),
                 }
+                # Only include players/stats_by_id if explicitly provided
+                if "players" in arguments and arguments["players"]:
+                    json_data["players"] = arguments["players"]
+                if "stats_by_id" in arguments and arguments["stats_by_id"]:
+                    json_data["stats_by_id"] = arguments["stats_by_id"]
                 result = self._call_api("POST", "/tools/calculate-values", json_data=json_data)
                 if isinstance(result, dict) and "valued_players" in result:
                     self._add_activity(

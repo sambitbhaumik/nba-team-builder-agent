@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .db import clear_session_roster, get_session_roster, update_session_roster
@@ -10,20 +13,84 @@ from .nba import PlayerProfile, fetch_active_players, fetch_player_season_per_ga
 from .report import generate_csv_report
 from .roster import PlayerValue, dollar_value, fantasy_points_per_game, optimize_roster, score_player
 
+# Cache file path
+CACHE_FILE = Path(__file__).resolve().parent.parent / "data" / "player_stats_cache.json"
+
+
+def _save_player_stats_cache(players: List[PlayerProfile], stats_by_id: Dict[int, Dict[str, float]]) -> None:
+    """Save player stats to cache file."""
+    CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    cache_data = {
+        "players": [
+            {
+                "player_id": p.player_id,
+                "full_name": p.full_name,
+                "team": p.team,
+                "position": p.position,
+            }
+            for p in players
+        ],
+        "stats_by_id": stats_by_id,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with open(CACHE_FILE, "w") as f:
+        json.dump(cache_data, f, indent=2)
+
+
+def _load_player_stats_cache() -> Optional[Tuple[List[PlayerProfile], Dict[int, Dict[str, float]]]]:
+    """Load player stats from cache file. Returns None if cache doesn't exist."""
+    if not CACHE_FILE.exists():
+        return None
+    
+    try:
+        with open(CACHE_FILE, "r") as f:
+            cache_data = json.load(f)
+        
+        players = [
+            PlayerProfile(
+                player_id=p["player_id"],
+                full_name=p["full_name"],
+                team=p.get("team"),
+                position=p.get("position"),
+            )
+            for p in cache_data.get("players", [])
+        ]
+        stats_by_id = cache_data.get("stats_by_id", {})
+        return players, stats_by_id
+    except (json.JSONDecodeError, KeyError, FileNotFoundError):
+        return None
+
 
 def tool_fetch_player_stats() -> Tuple[List[PlayerProfile], Dict[int, Dict[str, float]]]:
+    """Fetch player stats from NBA API and save to cache."""
     players = fetch_active_players()
-    max_players = int(os.getenv("MAX_PLAYER_STATS", "60"))
+    max_players = int(os.getenv("MAX_PLAYER_STATS", "100"))
     if max_players > 0:
         players = players[:max_players]
     stats_by_id: Dict[int, Dict[str, float]] = {}
-    for player in players:
+    for i, player in enumerate(players):
         stats = fetch_player_season_per_game(player.player_id)
         if stats == "error":
             print(f"Error fetching stats for player {player.full_name}")
             continue
         stats_by_id[player.player_id] = stats
+        
+        # Add delay between requests to avoid rate limiting (skip delay after last player)
+        if i < len(players) - 1:
+            time.sleep(1.0)  # Wait 1 second between requests
+    
+    # Save to cache
+    _save_player_stats_cache(players, stats_by_id)
+    
     return players, stats_by_id
+
+
+def tool_get_cached_player_stats() -> Tuple[List[PlayerProfile], Dict[int, Dict[str, float]]]:
+    """Get player stats from cache. Returns empty lists if cache doesn't exist."""
+    cached = _load_player_stats_cache()
+    if cached:
+        return cached
+    return [], {}
 
 
 def tool_calculate_values(
@@ -123,8 +190,8 @@ def add_player_to_roster(
     if len(current_players) >= slots:
         return {"success": False, "error": "Roster is full", "roster": roster_data}
     
-    # Fetch player data
-    players, stats_by_id = tool_fetch_player_stats()
+    # Fetch player data from cache
+    players, stats_by_id = tool_get_cached_player_stats()
     player_profile = next((p for p in players if p.player_id == player_id), None)
     if not player_profile:
         return {"success": False, "error": "Player not found", "roster": roster_data}
@@ -195,7 +262,7 @@ def search_players(
     limit: int = 20,
 ) -> List[Dict[str, Any]]:
     """Search for players matching criteria."""
-    players, stats_by_id = tool_fetch_player_stats()
+    players, stats_by_id = tool_get_cached_player_stats()
     preferences = load_preferences()
     
     results = []
@@ -241,7 +308,7 @@ def search_players(
 
 def get_player_details(player_id: int, budget: float = 200.0) -> Dict[str, Any]:
     """Get detailed information about a specific player."""
-    players, stats_by_id = tool_fetch_player_stats()
+    players, stats_by_id = tool_get_cached_player_stats()
     player_profile = next((p for p in players if p.player_id == player_id), None)
     
     if not player_profile:

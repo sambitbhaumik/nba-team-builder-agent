@@ -125,8 +125,8 @@ class FetchPlayerStatsResponse(BaseModel):
 
 
 class CalculateValuesRequest(BaseModel):
-    players: List[PlayerProfileResponse]
-    stats_by_id: Dict[int, Dict[str, float]]
+    players: Optional[List[PlayerProfileResponse]] = None
+    stats_by_id: Optional[Dict[int, Dict[str, float]]] = None
     preferences: List[str]
     budget: float
 
