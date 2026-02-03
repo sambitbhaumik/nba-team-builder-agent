@@ -464,21 +464,13 @@ def api_get_current_roster(session_id: str) -> CurrentRoster:
 
 @app.get("/players/search")
 def api_search_players(
-    name: str | None = None,
-    position: str | None = None,
-    team: str | None = None,
-    min_fpg: float | None = None,
-    max_cost: float | None = None,
+    name: str,
     budget: float = 200.0,
     limit: int = 20,
 ) -> list[dict[str, Any]]:
-    """Search for players matching specific criteria."""
+    """Search for players by name (partial match)."""
     return search_players(
         name=name,
-        position=position,
-        team=team,
-        min_fpg=min_fpg,
-        max_cost=max_cost,
         budget=budget,
         limit=limit,
     )

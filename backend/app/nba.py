@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from nba_api.stats.endpoints import commonallplayers, playercareerstats
+from nba_api.stats.endpoints import commonallplayers, playercareerstats, commonplayerinfo
 
 # Cache for active players: (data, timestamp)
 _active_players_cache: Tuple[Optional[List["PlayerProfile"]], float] = (None, 0.0)
@@ -34,6 +34,8 @@ def fetch_active_players(force_refresh: bool = False) -> List[PlayerProfile]:
     for _, row in data.iterrows():
         if row.get("ROSTERSTATUS") != 1:
             continue
+        # rate-limited api call, so we'll just use None for now
+        # position = commonplayerinfo.CommonPlayerInfo(row.PERSON_ID).get_normalized_dict()['CommonPlayerInfo'][0]['POSITION']
         players.append(
             PlayerProfile(
                 player_id=int(row["PERSON_ID"]),

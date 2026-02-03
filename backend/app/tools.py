@@ -101,7 +101,7 @@ def tool_calculate_values(
 ) -> List[PlayerValue]:
     valued: List[PlayerValue] = []
     for player in players:
-        stats = stats_by_id.get(player.player_id) or {}
+        stats = stats_by_id.get(str(player.player_id)) or {}
         if not stats:
             continue
         fpg = fantasy_points_per_game(stats)
@@ -196,7 +196,7 @@ def add_player_to_roster(
     if not player_profile:
         return {"success": False, "error": "Player not found", "roster": roster_data}
     
-    stats = stats_by_id.get(player_id) or {}
+    stats = stats_by_id.get(str(player_id)) or {}
     if not stats:
         return {"success": False, "error": "Player stats not available", "roster": roster_data}
     
@@ -253,40 +253,26 @@ def remove_player_from_roster(session_id: str, player_id: int) -> Dict[str, Any]
 
 
 def search_players(
-    name: Optional[str] = None,
-    position: Optional[str] = None,
-    team: Optional[str] = None,
-    min_fpg: Optional[float] = None,
-    max_cost: Optional[float] = None,
+    name: str,
     budget: float = 200.0,
     limit: int = 20,
 ) -> List[Dict[str, Any]]:
-    """Search for players matching criteria."""
+    """Search for players by name (partial match)."""
     players, stats_by_id = tool_get_cached_player_stats()
     preferences = load_preferences()
     
     results = []
     for player in players:
-        stats = stats_by_id.get(player.player_id) or {}
+        stats = stats_by_id.get(str(player.player_id)) or {}
         if not stats:
             continue
         
-        # Apply filters
-        if name and name.lower() not in player.full_name.lower():
-            continue
-        if position and position.lower() != (player.position or "").lower():
-            continue
-        if team and team.lower() != (player.team or "").lower():
+        # Apply name filter
+        if name.lower() not in player.full_name.lower():
             continue
         
         fpg = fantasy_points_per_game(stats)
-        if min_fpg and fpg < min_fpg:
-            continue
-        
         value = dollar_value(fpg, budget=budget)
-        if max_cost and value > max_cost:
-            continue
-        
         score = score_player(stats, preferences)
         results.append({
             "player_id": player.player_id,
@@ -314,7 +300,7 @@ def get_player_details(player_id: int, budget: float = 200.0) -> Dict[str, Any]:
     if not player_profile:
         return {"success": False, "error": "Player not found"}
     
-    stats = stats_by_id.get(player_id) or {}
+    stats = stats_by_id.get(str(player_id)) or {}
     if not stats:
         return {"success": False, "error": "Player stats not available"}
     
@@ -344,10 +330,45 @@ def find_replacements(
     limit: int = 10,
 ) -> List[Dict[str, Any]]:
     """Find replacement players, optionally for a specific position."""
+    players, stats_by_id = tool_get_cached_player_stats()
+    preferences = load_preferences()
     exclude_ids = set(exclude_player_ids or [])
-    return search_players(
-        position=position,
-        max_cost=max_cost,
-        budget=budget,
-        limit=limit,
-    )
+    
+    results = []
+    for player in players:
+        # Skip excluded players
+        if player.player_id in exclude_ids:
+            continue
+        
+        stats = stats_by_id.get(str(player.player_id)) or {}
+        if not stats:
+            continue
+        
+        # Apply position filter
+        if position and position.lower() != (player.position or "").lower():
+            continue
+        
+        fpg = fantasy_points_per_game(stats)
+        value = dollar_value(fpg, budget=budget)
+        
+        # Apply max_cost filter
+        if max_cost and value > max_cost:
+            continue
+        
+        score = score_player(stats, preferences)
+        results.append({
+            "player_id": player.player_id,
+            "name": player.full_name,
+            "team": player.team or "",
+            "position": player.position or "",
+            "fpg": fpg,
+            "dollar_value": value,
+            "score": score,
+        })
+        
+        if len(results) >= limit:
+            break
+    
+    # Sort by score
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return results

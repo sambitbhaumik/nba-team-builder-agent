@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -18,11 +19,20 @@ from .db import (
 )
 from .knowledge import load_preferences
 
-load_dotenv()
+# Load .env file from the backend directory (parent of app directory)
+env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(env_path)
 
 # Initialize OpenAI client for OpenRouter
+api_key = os.getenv("OPENROUTER_API_KEY")
+if not api_key:
+    raise ValueError(
+        "OPENROUTER_API_KEY environment variable is not set. "
+        "Please ensure the .env file exists in the backend directory."
+    )
+
 client = OpenAI(
-    api_key=os.getenv("OPENROUTER_API_KEY"),
+    api_key=api_key,
     base_url="https://openrouter.ai/api/v1",
 )
 
@@ -52,29 +62,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_players",
-            "description": "Search for players matching specific criteria like name, position, team, minimum FPG, or maximum cost.",
+            "description": "Search for players by name (partial match).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
                         "description": "Player name to search for (partial match)",
-                    },
-                    "position": {
-                        "type": "string",
-                        "description": "Player position (PG, SG, SF, PF, C)",
-                    },
-                    "team": {
-                        "type": "string",
-                        "description": "Team abbreviation (e.g., LAL, GSW)",
-                    },
-                    "min_fpg": {
-                        "type": "number",
-                        "description": "Minimum fantasy points per game",
-                    },
-                    "max_cost": {
-                        "type": "number",
-                        "description": "Maximum dollar value/cost",
                     },
                     "budget": {
                         "type": "number",
@@ -85,7 +79,7 @@ TOOLS = [
                         "description": "Maximum number of results to return (default 20)",
                     },
                 },
-                "required": [],
+                "required": ["name"],
             },
         },
     },
@@ -313,8 +307,7 @@ When building rosters:
 
 For advanced roster operations:
 - Use tool_get_cached_player_stats to get comprehensive player data and statistics from cache (fast)
-- Use tool_fetch_player_stats only when you need to refresh the player pool (slow, should be done manually)
-- Use tool_calculate_values to calculate fantasy values for players based on stats and preferences. It automatically uses cached player data if you don't provide players/stats_by_id.
+- Use tool_calculate_values to calculate fantasy values for players based on stats and preferences.
 - Use tool_optimize_roster to automatically optimize a roster from a list of valued players
 - These tools work together: calculate values (uses cache automatically) → optimize roster
 
@@ -400,10 +393,6 @@ class ReActAgent:
             elif tool_name == "search_players":
                 params = {
                     "name": arguments.get("name"),
-                    "position": arguments.get("position"),
-                    "team": arguments.get("team"),
-                    "min_fpg": arguments.get("min_fpg"),
-                    "max_cost": arguments.get("max_cost"),
                     "budget": arguments.get("budget", budget),
                     "limit": arguments.get("limit", 20),
                 }
@@ -503,22 +492,22 @@ class ReActAgent:
                         result.get("error", "No cached data available. Please refresh player stats first."),
                     )
                 return result
-
-            elif tool_name == "tool_fetch_player_stats":
-                result = self._call_api("POST", "/tools/fetch-player-stats", json_data={})
-                if isinstance(result, dict) and "players" in result:
-                    self._add_activity(
-                        "Tool: tool_fetch_player_stats",
-                        "success",
-                        f"Fetched and cached stats for {len(result.get('players', []))} players",
-                    )
-                else:
-                    self._add_activity(
-                        "Tool: tool_fetch_player_stats",
-                        "error",
-                        result.get("error", "Unknown error"),
-                    )
-                return result
+            
+            # elif tool_name == "tool_fetch_player_stats":
+            #     result = self._call_api("POST", "/tools/fetch-player-stats", json_data={})
+            #     if isinstance(result, dict) and "players" in result:
+            #         self._add_activity(
+            #             "Tool: tool_fetch_player_stats",
+            #             "success",
+            #             f"Fetched and cached stats for {len(result.get('players', []))} players",
+            #         )
+            #     else:
+            #         self._add_activity(
+            #             "Tool: tool_fetch_player_stats",
+            #             "error",
+            #             result.get("error", "Unknown error"),
+            #         )
+            #     return result
 
             elif tool_name == "tool_calculate_values":
                 json_data = {
