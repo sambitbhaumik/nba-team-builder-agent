@@ -66,3 +66,101 @@ class TeamSaveRequest(BaseModel):
 
 class TeamListResponse(BaseModel):
     items: List[Dict[str, Any]]
+
+
+class RosterPlayer(BaseModel):
+    player_id: int
+    name: str
+    team: Optional[str] = None
+    position: Optional[str] = None
+    fpg: float
+    dollar_value: float
+    score: float
+
+
+class CurrentRoster(BaseModel):
+    players: List[RosterPlayer] = Field(default_factory=list)
+    total_cost: float = 0.0
+    budget: float = 200.0
+    slots: int = 12
+    slots_remaining: int = 12
+
+
+class PlayerSearchRequest(BaseModel):
+    name: Optional[str] = None
+    position: Optional[str] = None
+    team: Optional[str] = None
+    min_fpg: Optional[float] = None
+    max_cost: Optional[float] = None
+
+
+class AgentToolResult(BaseModel):
+    tool_name: str
+    success: bool
+    result: Any
+    error: Optional[str] = None
+
+
+class AddPlayerRequest(BaseModel):
+    player_id: int
+    budget: Optional[float] = 200.0
+    slots: Optional[int] = 12
+
+
+class OptimizeRosterRequest(BaseModel):
+    budget: Optional[float] = None
+    slots: Optional[int] = None
+
+
+class PlayerProfileResponse(BaseModel):
+    player_id: int
+    full_name: str
+    team: Optional[str] = None
+    position: Optional[str] = None
+
+
+class FetchPlayerStatsResponse(BaseModel):
+    players: List[PlayerProfileResponse]
+    stats_by_id: Dict[int, Dict[str, float]]
+
+
+class CalculateValuesRequest(BaseModel):
+    players: List[PlayerProfileResponse]
+    stats_by_id: Dict[int, Dict[str, float]]
+    preferences: List[str]
+    budget: float
+
+
+class PlayerValueResponse(BaseModel):
+    player_id: int
+    name: str
+    team: str
+    position: str
+    stats: Dict[str, float]
+    fpg: float
+    dollar_value: float
+    score: float
+
+
+class CalculateValuesResponse(BaseModel):
+    valued_players: List[PlayerValueResponse]
+
+
+class OptimizeRosterFromValuesRequest(BaseModel):
+    players: List[PlayerValueResponse]
+    budget: float
+    slots: int
+
+
+class OptimizeRosterFromValuesResponse(BaseModel):
+    optimized_roster: List[PlayerValueResponse]
+    total_cost: float
+
+
+class GenerateReportRequest(BaseModel):
+    roster: List[PlayerValueResponse]
+
+
+class GenerateReportResponse(BaseModel):
+    success: bool
+    report_path: Optional[str] = None

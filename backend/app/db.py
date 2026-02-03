@@ -51,6 +51,18 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS session_rosters (
+                session_id TEXT PRIMARY KEY,
+                roster_json TEXT NOT NULL,
+                budget REAL NOT NULL DEFAULT 200.0,
+                slots INTEGER NOT NULL DEFAULT 12,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            )
+            """
+        )
         conn.commit()
 
 
@@ -162,3 +174,72 @@ def list_teams() -> List[Dict[str, Any]]:
             """
         ).fetchall()
         return [dict(row) for row in rows]
+
+
+def get_session_roster(session_id: str) -> Dict[str, Any]:
+    """Get current roster for a session."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT roster_json, budget, slots FROM session_rosters WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if not row:
+            return {
+                "players": [],
+                "budget": 200.0,
+                "slots": 12,
+                "total_cost": 0.0,
+            }
+        roster_data = json.loads(row["roster_json"])
+        return {
+            "players": roster_data.get("players", []),
+            "budget": float(row["budget"]),
+            "slots": int(row["slots"]),
+            "total_cost": sum(p.get("dollar_value", 0.0) for p in roster_data.get("players", [])),
+        }
+
+
+def update_session_roster(
+    session_id: str,
+    players: List[Dict[str, Any]],
+    budget: float = 200.0,
+    slots: int = 12,
+) -> None:
+    """Update roster for a session."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    roster_json = json.dumps({"players": players})
+    with get_connection() as conn:
+        existing = conn.execute(
+            "SELECT session_id FROM session_rosters WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE session_rosters
+                SET roster_json = ?, budget = ?, slots = ?, updated_at = ?
+                WHERE session_id = ?
+                """,
+                (roster_json, budget, slots, now, session_id),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO session_rosters (session_id, roster_json, budget, slots, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (session_id, roster_json, budget, slots, now),
+            )
+        conn.commit()
+
+
+def clear_session_roster(session_id: str) -> None:
+    """Clear roster for a session."""
+    with get_connection() as conn:
+        conn.execute(
+            "DELETE FROM session_rosters WHERE session_id = ?",
+            (session_id,),
+        )
+        conn.commit()

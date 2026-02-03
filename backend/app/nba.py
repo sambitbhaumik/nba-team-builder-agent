@@ -48,7 +48,12 @@ def fetch_active_players(force_refresh: bool = False) -> List[PlayerProfile]:
 
 
 def fetch_player_season_per_game(player_id: int) -> Dict[str, float]:
-    data = playercareerstats.PlayerCareerStats(player_id=player_id).get_data_frames()
+    try:
+        data = playercareerstats.PlayerCareerStats(player_id=player_id).get_data_frames()
+    except (KeyError, ValueError, Exception):
+        # Skip players with API errors (missing 'resultSet', invalid data, etc.)
+        return "error"
+    
     if not data:
         return {}
     # The first DataFrame in the list (SeasonTotalsRegularSeason) contains the year-by-year regular season stats.
@@ -63,18 +68,18 @@ def fetch_player_season_per_game(player_id: int) -> Dict[str, float]:
         return {}
     
     per_game = {
-        "pts": float(last.get("PTS") or 0) / games,
-        "reb": float(last.get("REB") or 0) / games,
-        "oreb": float(last.get("OREB") or 0) / games,
-        "dreb": float(last.get("DREB") or 0) / games,
-        "ast": float(last.get("AST") or 0) / games,
-        "stl": float(last.get("STL") or 0) / games,
-        "blk": float(last.get("BLK") or 0) / games,
-        "tov": float(last.get("TOV") or 0) / games,
-        "fg3m": float(last.get("FG3M") or 0) / games,
-        "fg_pct": float(last.get("FG_PCT") or 0),
-        "fg3_pct": float(last.get("FG3_PCT") or 0),
-        "ft_pct": float(last.get("FT_PCT") or 0),
+        "pts": round(float(last.get("PTS") or 0) / games, 2),
+        "reb": round(float(last.get("REB") or 0) / games, 2),
+        "oreb": round(float(last.get("OREB") or 0) / games, 2),
+        "dreb": round(float(last.get("DREB") or 0) / games, 2),
+        "ast": round(float(last.get("AST") or 0) / games, 2),
+        "stl": round(float(last.get("STL") or 0) / games, 2),
+        "blk": round(float(last.get("BLK") or 0) / games, 2),
+        "tov": round(float(last.get("TOV") or 0) / games, 2),
+        "fg3m": round(float(last.get("FG3M") or 0) / games, 2),
+        "fg_pct": round(float(last.get("FG_PCT") or 0), 2),
+        "fg3_pct": round(float(last.get("FG3_PCT") or 0), 2),
+        "ft_pct": round(float(last.get("FT_PCT") or 0), 2),
         "age": last.get("PLAYER_AGE") or 0,
     }
     return per_game

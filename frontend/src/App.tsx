@@ -78,7 +78,7 @@ type Message = {
   knowledgeHint?: string;
 };
 
-const initialPlayers: Player[] = [
+let initialPlayers: Player[] = [
   { id: "p1", name: "Stephen Curry", position: "PG", team: "GSW", fpg: 45.7, value: 30.5, tags: ["3PT", "OFFENSE"], steals: 1.1, threes: 4.8, rebounds: 4.4 },
   { id: "p2", name: "Damian Lillard", position: "PG", team: "MIL", fpg: 41.3, value: 27.6, tags: ["3PT", "CLUTCH"], steals: 1.0, threes: 4.2, rebounds: 4.3 },
   { id: "p3", name: "Jrue Holiday", position: "PG", team: "BOS", fpg: 32.4, value: 21.6, tags: ["DEFENSE"], steals: 1.4, threes: 2.1, rebounds: 4.6 },
@@ -122,6 +122,9 @@ export default function App() {
   ]);
   const [userInput, setUserInput] = useState("");
   const [roster, setRoster] = useState<RosterSlot[]>(rosterTemplate);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [players, setPlayers] = useState<Player[]>(initialPlayers);
   const [placingSlots, setPlacingSlots] = useState<string[]>([]);
   const [savedTeams, setSavedTeams] = useState<SavedTeam[]>([
     { id: "team-1", name: "Defensive Anchors", createdAt: "2026-01-28 18:21", budgetUsed: 142.5, roster: rosterTemplate },
@@ -138,8 +141,8 @@ export default function App() {
   const menuRef = useRef<HTMLDivElement>(null);
 
   const playerById = useMemo(
-    () => Object.fromEntries(initialPlayers.map((p) => [p.id, p])),
-    []
+    () => Object.fromEntries(players.map((p) => [p.id, p])),
+    [players]
   );
 
   const rosterPlayers = roster
@@ -155,7 +158,7 @@ export default function App() {
     setExpandedTraces((prev) => ({ ...prev, [id]: !prev[id] }));
 
   const autoFillRoster = () => {
-    const recommended = [...initialPlayers].sort((a, b) => b.fpg - a.fpg).slice(0, 12);
+    const recommended = [...players].sort((a, b) => b.fpg - a.fpg).slice(0, 12);
     const updated = roster.map((slot, i) => ({ ...slot, playerId: recommended[i]?.id }));
     setRoster(updated);
     setPlacingSlots(updated.map((s) => s.id));
@@ -186,27 +189,125 @@ export default function App() {
     });
   };
 
-  const handleSend = () => {
-    if (!userInput.trim()) return;
+  const handleSend = async () => {
+    if (!userInput.trim() || isLoading) return;
+    
     const userMsg: Message = { id: `u-${Date.now()}`, role: "user", content: userInput.trim() };
-    const trace: TraceStep[] = [
-      { action: "Parse user intent", status: "success", detail: "budget=150, priorities=3PT+defense" },
-      { action: "Fetch NBA API data", status: "success", detail: "450 active players loaded" },
-      { action: "Compute FPG + dollar values", status: "success" },
-      { action: "Filter by criteria", status: "success", detail: "Defensive wings with 3PT > 36%" },
-      { action: "Optimize roster", status: "success" },
-    ];
-    const assistantMsg: Message = {
-      id: `a-${Date.now()}`,
-      role: "assistant",
-      content:
-        "I've built a roster prioritizing 3-point shooting and defense within your $150 budget. Review it in the panel on the right, then save or adjust as needed.",
-      trace,
-      knowledgeHint: "Based on your history, I weighted high-steal players more heavily.",
-    };
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+    setMessages((prev) => [...prev, userMsg]);
     setUserInput("");
-    autoFillRoster();
+    setIsLoading(true);
+    
+    try {
+      const response = await fetch("http://localhost:8000/agent/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          goal: userInput.trim(),
+          budget: budgetTotal,
+          session_id: sessionId,
+          dry_run: false,
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log("Model response:", data);
+      
+      // Update session ID if provided
+      if (data.session_id && !sessionId) {
+        setSessionId(data.session_id);
+      }
+      
+      // Convert activity log to trace steps
+      const trace: TraceStep[] = (data.activity_log || []).map((activity: any) => ({
+        action: activity.step || activity.action || "",
+        status: activity.status === "success" ? "success" : activity.status === "error" ? "fail" : "pending",
+        detail: activity.detail || "",
+      }));
+      
+      // Combine all reasoning and actions into a single message
+      const reasoningContent = data.activity_log
+        ?.filter((a: any) => a.step === "Reasoning" && a.detail)
+        .map((a: any) => a.detail)
+        .join("\n\n") || "";
+      
+      const assistantMsg: Message = {
+        id: `a-${Date.now()}`,
+        role: "assistant",
+        content: data.message || reasoningContent || "Task completed.",
+        trace,
+        knowledgeHint: data.knowledge_used?.length > 0 
+          ? `Used preferences: ${data.knowledge_used.join(", ")}`
+          : undefined,
+      };
+      
+      setMessages((prev) => [...prev, assistantMsg]);
+      
+      // Update roster if provided
+      if (data.roster?.players && data.roster.players.length > 0) {
+        console.log("Roster update received:", data.roster.players);
+        updateRosterFromBackend(data.roster.players);
+      }
+      
+    } catch (error) {
+      console.error("Error calling agent:", error);
+      const errorMsg: Message = {
+        id: `a-${Date.now()}`,
+        role: "assistant",
+        content: `Error: ${error instanceof Error ? error.message : "Failed to communicate with agent"}`,
+        trace: [{ action: "Error", status: "fail", detail: String(error) }],
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+    } finally {
+      setIsLoading(false);
+      scrollToBottom();
+    }
+  };
+  
+  const updateRosterFromBackend = (backendPlayers: any[]) => {
+    // Map backend players to frontend roster slots
+    const updatedRoster = [...rosterTemplate];
+    const newPlayers: Player[] = [...players];
+    let slotIndex = 0;
+    
+    backendPlayers.forEach((player: any) => {
+      if (slotIndex < updatedRoster.length) {
+        // Find a matching player or create a placeholder
+        let existingPlayer = players.find(
+          (p) => p.name.toLowerCase() === player.name?.toLowerCase()
+        );
+        
+        if (!existingPlayer) {
+          // Create a new player entry if not found
+          const tempId = `temp-${player.player_id || Date.now()}-${slotIndex}`;
+          const tempPlayer: Player = {
+            id: tempId,
+            name: player.name || "Unknown",
+            position: (player.position as any) || "PG",
+            team: player.team || "",
+            fpg: player.fpg || 0,
+            value: player.dollar_value || 0,
+            tags: [],
+            steals: player.stats?.stl || 0,
+            threes: player.stats?.fg3m || 0,
+            rebounds: player.stats?.reb || 0,
+          };
+          newPlayers.push(tempPlayer);
+          existingPlayer = tempPlayer;
+        }
+        
+        updatedRoster[slotIndex].playerId = existingPlayer.id;
+        slotIndex++;
+      }
+    });
+    
+    setPlayers(newPlayers);
+    setRoster(updatedRoster);
+    setPlacingSlots(updatedRoster.map((s) => s.id));
+    setTimeout(() => setPlacingSlots([]), 800);
   };
 
   const saveRoster = () => {
@@ -399,19 +500,20 @@ export default function App() {
               value={userInput}
               onChange={(e) => setUserInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
+                if (e.key === "Enter" && !e.shiftKey && !isLoading) {
                   e.preventDefault();
                   handleSend();
-                  scrollToBottom();
                 }
               }}
               placeholder="Build me a team with $150..."
               className="min-h-[48px] resize-none rounded-2xl"
+              disabled={isLoading}
             />
             <Button 
               size="icon" 
-              onClick={() => { handleSend(); scrollToBottom(); }}
+              onClick={handleSend}
               className="rounded-2xl"
+              disabled={isLoading}
             >
               <Send className="h-4 w-4" />
             </Button>
