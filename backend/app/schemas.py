@@ -27,6 +27,7 @@ class PlayerStat(BaseModel):
     fpg: float
     dollar_value: float
     score: float
+    starter: bool = False
 
 
 class RosterResult(BaseModel):
@@ -76,6 +77,7 @@ class RosterPlayer(BaseModel):
     fpg: float
     dollar_value: float
     score: float
+    starter: bool = False
 
 
 class CurrentRoster(BaseModel):
@@ -140,6 +142,7 @@ class PlayerValueResponse(BaseModel):
     fpg: float
     dollar_value: float
     score: float
+    starter: bool = False
 
 
 class CalculateValuesResponse(BaseModel):

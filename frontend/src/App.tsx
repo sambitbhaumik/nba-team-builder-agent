@@ -47,6 +47,7 @@ type Player = {
   steals: number;
   threes: number;
   rebounds: number;
+  starter?: boolean;
 };
 
 type RosterSlot = {
@@ -190,6 +191,40 @@ export default function App() {
     });
   };
 
+  useEffect(() => {
+    const storedSessionId = localStorage.getItem("sport_agent_session_id");
+    let currentSessionId = storedSessionId;
+    if (storedSessionId) {
+      setSessionId(storedSessionId);
+      console.log("Session ID loaded from localStorage:", storedSessionId);
+    } else {
+      currentSessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      setSessionId(currentSessionId);
+      localStorage.setItem("sport_agent_session_id", currentSessionId!);
+      console.log("New session ID generated and stored:", currentSessionId);
+    }
+
+    // Fetch initial roster for the session
+    if (currentSessionId) {
+      fetchCurrentRoster(currentSessionId);
+    }
+  }, []);
+
+  const fetchCurrentRoster = async (sid: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/roster/${sid}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.players && data.players.length > 0) {
+          console.log("Initial roster loaded from session:", data.players);
+          updateRosterFromBackend(data.players);
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching initial roster:", error);
+    }
+  };
+
   const handleSend = async () => {
     if (!userInput.trim() || isLoading) return;
     
@@ -218,8 +253,9 @@ export default function App() {
       console.log("Model response:", data);
       
       // Update session ID if provided
-      if (data.session_id && !sessionId) {
+      if (data.session_id && data.session_id !== sessionId) {
         setSessionId(data.session_id);
+        localStorage.setItem("sport_agent_session_id", data.session_id);
       }
       
       // Convert activity log to trace steps
@@ -270,20 +306,19 @@ export default function App() {
   
   const updateRosterFromBackend = (backendPlayers: any[]) => {
     // Map backend players to frontend roster slots
-    const updatedRoster = [...rosterTemplate];
+    const updatedRoster = [...rosterTemplate].map(slot => ({ ...slot }));
     const newPlayers: Player[] = [...players];
-    let slotIndex = 0;
     
-    backendPlayers.forEach((player: any) => {
-      if (slotIndex < updatedRoster.length) {
+    backendPlayers.forEach((player: any, index: number) => {
+      if (index < updatedRoster.length) {
         // Find a matching player or create a placeholder
-        let existingPlayer = players.find(
+        let existingPlayer = newPlayers.find(
           (p) => p.name.toLowerCase() === player.name?.toLowerCase()
         );
         
         if (!existingPlayer) {
           // Create a new player entry if not found
-          const tempId = `temp-${player.player_id || Date.now()}-${slotIndex}`;
+          const tempId = `temp-${player.player_id || Date.now()}-${index}`;
           const tempPlayer: Player = {
             id: tempId,
             name: player.name || "Unknown",
@@ -295,19 +330,30 @@ export default function App() {
             steals: player.stats?.stl || 0,
             threes: player.stats?.fg3m || 0,
             rebounds: player.stats?.reb || 0,
+            starter: player.starter,
           };
           newPlayers.push(tempPlayer);
           existingPlayer = tempPlayer;
+        } else {
+          // Update starter status for existing player
+          existingPlayer.starter = player.starter;
+          // Update other stats if available
+          if (player.stats) {
+            existingPlayer.steals = player.stats.stl || existingPlayer.steals;
+            existingPlayer.threes = player.stats.fg3m || existingPlayer.threes;
+            existingPlayer.rebounds = player.stats.reb || existingPlayer.rebounds;
+          }
+          if (player.fpg) existingPlayer.fpg = player.fpg;
+          if (player.dollar_value) existingPlayer.value = player.dollar_value;
         }
         
-        updatedRoster[slotIndex].playerId = existingPlayer.id;
-        slotIndex++;
+        updatedRoster[index].playerId = existingPlayer.id;
       }
     });
     
     setPlayers(newPlayers);
     setRoster(updatedRoster);
-    setPlacingSlots(updatedRoster.map((s) => s.id));
+    setPlacingSlots(updatedRoster.filter(s => s.playerId).map((s) => s.id));
     setTimeout(() => setPlacingSlots([]), 800);
   };
 
@@ -449,6 +495,20 @@ export default function App() {
     }
   };
 
+  const clearSession = () => {
+    const newSessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    setSessionId(newSessionId);
+    localStorage.setItem("sport_agent_session_id", newSessionId);
+    setMessages([
+      {
+        id: "m0",
+        role: "assistant",
+        content: "Session cleared. What kind of roster do you want to build now?",
+      },
+    ]);
+    setRoster(rosterTemplate);
+  };
+
   return (
     <div
       className="flex h-screen select-none"
@@ -459,11 +519,19 @@ export default function App() {
       {/* LEFT: Chat */}
       <section
         className="flex flex-col border-r border-border bg-card relative"
-        style={{ width: hasRoster && rightPanelVisible ? `${leftWidth}%` : "100%" }}
+        style={{ width: rightPanelVisible ? `${leftWidth}%` : "100%" }}
       >
         <header className="flex items-center justify-between border-b border-border px-5 py-4">
           <h1 className="text-lg font-semibold tracking-tight">Sport Agent</h1>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={clearSession}
+              className="text-xs"
+            >
+              Clear Session
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -473,7 +541,6 @@ export default function App() {
             >
               {isRefreshingPlayers ? "Refreshing..." : "Refresh Players"}
             </Button>
-            <Badge className="bg-primary text-primary-foreground">$150 Budget</Badge>
           </div>
         </header>
 
@@ -560,7 +627,7 @@ export default function App() {
         </div>
 
         {/* Toggle button when right panel is hidden */}
-        {hasRoster && !rightPanelVisible && (
+        {!rightPanelVisible && (
           <button
             onClick={() => setRightPanelVisible(true)}
             className="absolute right-4 top-1/2 -translate-y-1/2 z-10 rounded-full bg-primary text-primary-foreground p-2 shadow-lg hover:bg-primary/90 transition-colors"
@@ -572,7 +639,7 @@ export default function App() {
       </section>
 
       {/* RESIZE HANDLE */}
-      {hasRoster && rightPanelVisible && (
+      {rightPanelVisible && (
         <div
           onMouseDown={onMouseDown}
           className="resize-handle flex w-2 items-center justify-center bg-border hover:bg-primary/30"
@@ -582,7 +649,7 @@ export default function App() {
       )}
 
       {/* RIGHT: Roster + Artifacts */}
-      {hasRoster && rightPanelVisible && (
+      {rightPanelVisible && (
         <section className="flex flex-1 flex-col overflow-hidden bg-background">
           <header className="flex items-center justify-between border-b border-border px-5 py-4">
             <div>
@@ -732,7 +799,9 @@ export default function App() {
                           placingSlots.includes(slot.id) && "ring-2 ring-primary"
                         )}
                       >
-                        <span className="text-[10px] uppercase text-muted-foreground">{slot.label}</span>
+                        <span className="text-[10px] uppercase text-muted-foreground">
+                          {slot.label} {p?.starter && <Badge className="ml-1 h-3 px-1 text-[8px] bg-yellow-500">STARTER</Badge>}
+                        </span>
                         {p ? (
                           <div
                             draggable

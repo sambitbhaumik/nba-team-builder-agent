@@ -40,7 +40,7 @@ from .schemas import (
 )
 from .tools import (
     add_player_to_roster,
-    find_replacements,
+    #find_replacements,
     get_current_roster,
     get_player_details,
     remove_player_from_roster,
@@ -450,6 +450,7 @@ def api_get_current_roster(session_id: str) -> CurrentRoster:
             fpg=p.get("fpg", 0.0),
             dollar_value=p.get("dollar_value", 0.0),
             score=p.get("score", 0.0),
+            starter=p.get("starter", False),
         )
         for p in roster_data.get("players", [])
     ]
@@ -505,22 +506,22 @@ def api_remove_player_from_roster(
     return remove_player_from_roster(session_id, player_id)
 
 
-@app.get("/players/replacements")
-def api_find_replacements(
-    position: str | None = None,
-    exclude_player_ids: list[int] | None = None,
-    budget: float = 200.0,
-    max_cost: float | None = None,
-    limit: int = 10,
-) -> list[dict[str, Any]]:
-    """Find replacement players for a specific position."""
-    return find_replacements(
-        position=position,
-        exclude_player_ids=exclude_player_ids,
-        budget=budget,
-        max_cost=max_cost,
-        limit=limit,
-    )
+# @app.get("/players/replacements")
+# def api_find_replacements(
+#     position: str | None = None,
+#     exclude_player_ids: list[int] | None = None,
+#     budget: float = 200.0,
+#     max_cost: float | None = None,
+#     limit: int = 10,
+# ) -> list[dict[str, Any]]:
+#     """Find replacement players for a specific position."""
+#     return find_replacements(
+#         position=position,
+#         exclude_player_ids=exclude_player_ids,
+#         budget=budget,
+#         max_cost=max_cost,
+#         limit=limit,
+#     )
 
 
 @app.post("/roster/{session_id}/optimize")

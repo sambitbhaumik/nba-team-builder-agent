@@ -14,6 +14,7 @@ class PlayerValue:
     fpg: float
     dollar_value: float
     score: float
+    starter: bool = False
 
 
 def fantasy_points_per_game(stats: Dict[str, float]) -> float:

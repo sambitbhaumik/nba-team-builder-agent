@@ -117,6 +117,7 @@ def tool_calculate_values(
                 fpg=fpg,
                 dollar_value=value,
                 score=score,
+                starter=False,
             )
         )
     return valued
@@ -140,6 +141,7 @@ def tool_generate_report(roster: List[PlayerValue]) -> str:
             "fpg": round(player.fpg, 2),
             "dollar_value": round(player.dollar_value, 2),
             "score": round(player.score, 2),
+            "starter": player.starter,
         }
         for player in roster
     ]
@@ -161,6 +163,7 @@ def serialize_roster(roster: List[PlayerValue]) -> str:
                 "fpg": player.fpg,
                 "dollar_value": player.dollar_value,
                 "score": player.score,
+                "starter": player.starter,
             }
             for player in roster
         ]
@@ -220,6 +223,7 @@ def add_player_to_roster(
         "fpg": fpg,
         "dollar_value": value,
         "score": score,
+        "starter": len(current_players) < 5,
     }
     current_players.append(new_player)
     update_session_roster(session_id, current_players, budget, slots)
@@ -227,7 +231,7 @@ def add_player_to_roster(
     return {
         "success": True,
         "message": f"Added {player_profile.full_name} to roster",
-        "roster": get_session_roster(session_id),
+        #"roster": get_session_roster(session_id),
     }
 
 
@@ -242,13 +246,17 @@ def remove_player_from_roster(session_id: str, player_id: int) -> Dict[str, Any]
     if len(updated_players) == len(current_players):
         return {"success": False, "error": "Player not in roster", "roster": roster_data}
     
+    # Update starter status for remaining players
+    for i, p in enumerate(updated_players):
+        p["starter"] = i < 5
+    
     player_name = next((p.get("name") for p in current_players if p.get("player_id") == player_id), "Unknown")
     update_session_roster(session_id, updated_players, roster_data["budget"], roster_data["slots"])
     
     return {
         "success": True,
         "message": f"Removed {player_name} from roster",
-        "roster": get_session_roster(session_id),
+        #"roster": get_session_roster(session_id),
     }
 
 
@@ -282,6 +290,7 @@ def search_players(
             "fpg": fpg,
             "dollar_value": value,
             "score": score,
+            "starter": False,
         })
         
         if len(results) >= limit:
@@ -319,6 +328,7 @@ def get_player_details(player_id: int, budget: float = 200.0) -> Dict[str, Any]:
         "fpg": fpg,
         "dollar_value": value,
         "score": score,
+        "starter": False,
     }
 
 
@@ -364,6 +374,7 @@ def find_replacements(
             "fpg": fpg,
             "dollar_value": value,
             "score": score,
+            "starter": False,
         })
         
         if len(results) >= limit:

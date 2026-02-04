@@ -154,40 +154,40 @@ TOOLS = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "find_replacements",
-            "description": "Find replacement players for a specific position, optionally excluding certain players and filtering by cost.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "position": {
-                        "type": "string",
-                        "description": "Position to find replacements for (PG, SG, SF, PF, C)",
-                    },
-                    "exclude_player_ids": {
-                        "type": "array",
-                        "items": {"type": "integer"},
-                        "description": "List of player IDs to exclude from results",
-                    },
-                    "budget": {
-                        "type": "number",
-                        "description": "Total budget for calculating dollar values (default 200)",
-                    },
-                    "max_cost": {
-                        "type": "number",
-                        "description": "Maximum dollar value/cost for replacements",
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of results (default 10)",
-                    },
-                },
-                "required": [],
-            },
-        },
-    },
+    # {
+    #     "type": "function",
+    #     "function": {
+    #         "name": "find_replacements",
+    #         "description": "Find replacement players for a specific position, optionally excluding certain players and filtering by cost.",
+    #         "parameters": {
+    #             "type": "object",
+    #             "properties": {
+    #                 "position": {
+    #                     "type": "string",
+    #                     "description": "Position to find replacements for (PG, SG, SF, PF, C)",
+    #                 },
+    #                 "exclude_player_ids": {
+    #                     "type": "array",
+    #                     "items": {"type": "integer"},
+    #                     "description": "List of player IDs to exclude from results",
+    #                 },
+    #                 "budget": {
+    #                     "type": "number",
+    #                     "description": "Total budget for calculating dollar values (default 200)",
+    #                 },
+    #                 "max_cost": {
+    #                     "type": "number",
+    #                     "description": "Maximum dollar value/cost for replacements",
+    #                 },
+    #                 "limit": {
+    #                     "type": "integer",
+    #                     "description": "Maximum number of results (default 10)",
+    #                 },
+    #             },
+    #             "required": [],
+    #         },
+    #     },
+    # },
     {
         "type": "function",
         "function": {
@@ -300,18 +300,13 @@ SYSTEM_PROMPT = """You are a helpful assistant that helps users build fantasy NB
 
 When building rosters:
 - Always check the current roster state first using get_current_roster
-- Search for players that match the user's requirements
-- Consider budget constraints and roster slots
+- Run search_roster_players for players that match the user's requirements, budget constraints and available roster slots
 - Add players one at a time, validating each addition
 - Provide clear reasoning for your choices
 
-For advanced roster operations:
-- Use tool_get_cached_player_stats to get comprehensive player data and statistics from cache (fast)
-- Use tool_calculate_values to calculate fantasy values for players based on stats and preferences.
-- Use tool_optimize_roster to automatically optimize a roster from a list of valued players
-- These tools work together: calculate values (uses cache automatically) → optimize roster
-
-Be thorough in your reasoning and explain your thought process clearly."""
+Note:
+Player data is cached and updated periodically.
+Explain your thought process clearly and concisely."""
 
 
 class ReActAgent:
@@ -448,33 +443,33 @@ class ReActAgent:
                 )
                 return result
 
-            elif tool_name == "find_replacements":
-                params = {
-                    "position": arguments.get("position"),
-                    "budget": arguments.get("budget", budget),
-                    "max_cost": arguments.get("max_cost"),
-                    "limit": arguments.get("limit", 10),
-                }
-                # Handle exclude_player_ids
-                exclude_ids = arguments.get("exclude_player_ids")
-                if exclude_ids:
-                    params["exclude_player_ids"] = exclude_ids
-                # Remove None values
-                params = {k: v for k, v in params.items() if v is not None}
-                result = self._call_api("GET", "/players/replacements", params=params)
-                if isinstance(result, list):
-                    self._add_activity(
-                        "Tool: find_replacements",
-                        "success",
-                        f"Found {len(result)} replacement options",
-                    )
-                else:
-                    self._add_activity(
-                        "Tool: find_replacements",
-                        "error",
-                        result.get("error", "Unknown error"),
-                    )
-                return result
+            # elif tool_name == "find_replacements":
+            #     params = {
+            #         "position": arguments.get("position"),
+            #         "budget": arguments.get("budget", budget),
+            #         "max_cost": arguments.get("max_cost"),
+            #         "limit": arguments.get("limit", 10),
+            #     }
+            #     # Handle exclude_player_ids
+            #     exclude_ids = arguments.get("exclude_player_ids")
+            #     if exclude_ids:
+            #         params["exclude_player_ids"] = exclude_ids
+            #     # Remove None values
+            #     params = {k: v for k, v in params.items() if v is not None}
+            #     result = self._call_api("GET", "/players/replacements", params=params)
+            #     if isinstance(result, list):
+            #         self._add_activity(
+            #             "Tool: find_replacements",
+            #             "success",
+            #             f"Found {len(result)} replacement options",
+            #         )
+            #     else:
+            #         self._add_activity(
+            #             "Tool: find_replacements",
+            #             "error",
+            #             result.get("error", "Unknown error"),
+            #         )
+            #     return result
 
             elif tool_name == "tool_get_cached_player_stats":
                 # Call the API endpoint which will use cached data
