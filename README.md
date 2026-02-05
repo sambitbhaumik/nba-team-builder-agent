@@ -29,3 +29,5 @@ Key features include real-time streaming of agent reasoning, budget-aware player
 - The agent maintains persistent session state with SQLite-backed conversation history and activity logging. 
 - Employs 5 core tools for roster management: roster inspection, player search, detailed player lookup, player addition/removal, with all tools executed via HTTP API calls to maintain clean separation between agent logic and data operations.
 - The agent uses deterministic reasoning (temperature=0.0) with a maximum of 20 iterations per task, and includes reasoning summarization for efficient streaming.
+
+<img width="2818" height="1753" alt="image" src="https://github.com/user-attachments/assets/cd322d45-8843-4baa-895b-c33757f2135f" />
