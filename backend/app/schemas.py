@@ -84,6 +84,7 @@ class CurrentRoster(BaseModel):
     players: List[RosterPlayer] = Field(default_factory=list)
     total_cost: float = 0.0
     budget: float = 200.0
+    remaining_budget: float = 200.0
 
 
 class PlayerSearchRequest(BaseModel):

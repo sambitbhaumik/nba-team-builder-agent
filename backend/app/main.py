@@ -8,6 +8,7 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic.type_adapter import R
 
 from .agent import ReActAgent
 from .db import append_session_message, init_db, list_teams, query_preferences, save_team
@@ -454,8 +455,9 @@ def api_get_current_roster(session_id: str) -> CurrentRoster:
     ]
     return CurrentRoster(
         players=players,
-        total_cost=roster_data.get("total_cost", 0.0),
+        total_cost=round(roster_data.get("total_cost", 0.0), 2),
         budget=roster_data.get("budget", 200.0),
+        remaining_budget=round(roster_data.get("remaining_budget", 200.0), 2),
     )
 
 

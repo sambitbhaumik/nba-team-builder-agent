@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -18,6 +19,42 @@ from .db import (
     update_session_roster,
 )
 from .knowledge import load_preferences
+
+# Configure logging
+class ColorFormatter(logging.Formatter):
+    """Custom formatter to add colors to log levels."""
+    
+    GREY = "\x1b[38;20m"
+    YELLOW = "\x1b[33;20m"
+    RED = "\x1b[31;20m"
+    BOLD_RED = "\x1b[31;1m"
+    BLUE = "\x1b[34;20m"
+    RESET = "\x1b[0m"
+    FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+    FORMATS = {
+        logging.DEBUG: GREY + FORMAT + RESET,
+        logging.INFO: BLUE + FORMAT + RESET,
+        logging.WARNING: YELLOW + FORMAT + RESET,
+        logging.ERROR: RED + FORMAT + RESET,
+        logging.CRITICAL: BOLD_RED + FORMAT + RESET
+    }
+
+    def format(self, record):
+        log_fmt = self.FORMATS.get(record.levelno)
+        formatter = logging.Formatter(log_fmt)
+        return formatter.format(record)
+
+# Setup logger
+logger = logging.getLogger("agent")
+logger.setLevel(logging.INFO)
+
+# Create console handler with color formatter
+if not logger.handlers:
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(ColorFormatter())
+    logger.addHandler(ch)
 
 # Load .env file from the backend directory (parent of app directory)
 env_path = Path(__file__).parent.parent / ".env"
@@ -45,7 +82,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_current_roster",
-            "description": "Get the current roster state including players, budget, and total cost.",
+            "description": "Get the current roster state including players currently in the roster, budget allotted for the roster, and total cost already spent.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -65,9 +102,13 @@ TOOLS = [
                     #     "type": "string",
                     #     "description": "The session ID",
                     # },
+                    "search_budget": {
+                        "type": "number",
+                        "description": "Total budget allotted for the search (float). May be less than the total budget of the roster if some slots are already filled. (default 200.0)",
+                    },
                     "budget": {
                         "type": "number",
-                        "description": "Total budget (default 200)",
+                        "description": "Total budget allotted for the roster (float). Used for calculating budget-adjusted dollar value of the player (default 200.0)",
                     },
                     "count": {
                         "type": "integer",
@@ -92,7 +133,7 @@ TOOLS = [
                     },
                     "budget": {
                         "type": "number",
-                        "description": "Total budget for calculating dollar values (default 200)",
+                        "description": "Total budget allotted for the roster (float). Used for calculating budget-adjusted dollar value of the player (default 200.0)",
                     },
                 },
                 "required": ["player_name"],
@@ -117,7 +158,7 @@ TOOLS = [
                     },
                     "budget": {
                         "type": "number",
-                        "description": "Total budget (default 200)",
+                        "description": "Total budget allotted for the roster (float). Used for calculating budget-adjusted dollar value of the player (default 200.0)",
                     },
                 },
                 "required": ["player_id"],
@@ -206,22 +247,53 @@ TOOLS = [
 ]
 
 # System prompt for ReAct agent
-SYSTEM_PROMPT = """You are a helpful assistant that helps users build fantasy NBA rosters. You follow the ReAct (Reasoning and Acting) pattern:
+SYSTEM_PROMPT = """You are an intelligent, helpful assistant that builds fantasy NBA rosters of 12 players using the ReAct (Reasoning and Acting) pattern.
 
-1. **Thought**: Analyze the current situation and reason about what needs to be done
-2. **Action**: Decide which tool to use and call it with appropriate parameters
-3. **Observation**: Review the tool result and decide on the next step
+WORKFLOW (ReAct Pattern):
+1. **Thought**: State what you'll do next in 1-2 brief sentences
+2. **Action**: Call the appropriate tool
+3. **Observation**: Note the result in 1-2 sentences, then proceed
 
-When building rosters:
-- Always check the current roster state first using get_current_roster to see how many slots are open
-- Call search_roster_players with the number of open slots (count parameter) to find suitable players
-- The tool will return a list of player IDs that fit the remaining budget and slots
-- Add each player one by one using add_player_to_roster
-- Provide clear reasoning for your choices
+ROSTER BUILDING PROTOCOL:
+Step 1: Call get_current_roster to check available slots
+Step 2: Call search_roster_players with count=[number of slots to be filled] to get player IDs that fit search budget. If user requests roster without specifying count, fill all remaining slots
+Step 3: Call add_player_to_roster for each player ID sequentially.
+Step 4: Confirm completion
 
-Note:
-Player data is cached and updated periodically.
-Explain your thought process clearly and concisely."""
+NOTES:
+- If user asks to add a player by name, fetch their id by calling get_player_details first.
+- If user asks to remove a player, fetch their information by calling get_current_roster first.
+- If players have been added or removed, always tell the user who were added or removed.
+
+REASONING DEPTH CONTROL:
+- Use minimal reasoning for routine operations (checking roster, adding players)
+- Never reason about what to say to the user
+- Stop reasoning immediately after deciding on an action
+- IMPORTANT: Keep all reasoning under 3 sentences. Never more than 3 sentences.
+
+EFFICIENCY RULES:
+- No meta-commentary about "what we should tell the user"
+- No reasoning loops or self-dialogue
+
+Note: Player data is cached and periodically updated."""
+
+
+def _summarize_reasoning(reasoning_content: str) -> str:
+    """Summarize agent reasoning_content into a 1-2 line summary using another model."""
+    try:
+        response = client.chat.completions.create(
+            model="liquid/lfm-2.2-6b",
+            messages=[
+                {"role": "system", "content": "Summarize the following agent reasoning into a concise 1-2 line summary. Focus on the core intent and next steps."},
+                {"role": "user", "content": reasoning_content}
+            ],
+            temperature=0.3,
+            max_tokens=100
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"Error summarizing reasoning: {e}")
+        return reasoning_content[:200] + "..." # Fallback to truncated original
 
 
 class ReActAgent:
@@ -230,7 +302,7 @@ class ReActAgent:
     def __init__(
         self,
         session_id: str,
-        model: str = "nvidia/nemotron-3-nano-30b-a3b:free",
+        model: str = "openai/gpt-oss-120b",#"nvidia/nemotron-3-nano-30b-a3b:free",
         temperature: float = 0.0,
         max_iterations: int = 20,
     ):
@@ -295,7 +367,8 @@ class ReActAgent:
             elif tool_name == "search_roster_players":
                 params = {
                     "session_id": arguments.get("session_id", self.session_id),
-                    "budget": arguments.get("budget", budget),
+                    "search_budget": arguments.get("search_budget", 200.0),
+                    "budget": arguments.get("budget", 200.0),
                     "count": arguments.get("count", 1),
                 }
                 # Remove None values
@@ -318,7 +391,7 @@ class ReActAgent:
 
             elif tool_name == "get_player_details":
                 params = {
-                    "budget": arguments.get("budget", budget),
+                    "budget": arguments.get("budget", 200.0),
                 }
                 result = self._call_api("GET", f"/players/{arguments['player_name']}", params=params)
                 self._add_activity(
@@ -331,7 +404,7 @@ class ReActAgent:
             elif tool_name == "add_player_to_roster":
                 json_data = {
                     "player_id": arguments["player_id"],
-                    "budget": arguments.get("budget", budget),
+                    "budget": arguments.get("budget", 200.0),
                 }
                 result = self._call_api("POST", f"/roster/{self.session_id}/players", json_data=json_data)
                 self._add_activity(
@@ -487,18 +560,29 @@ class ReActAgent:
                     tools=TOOLS,
                     tool_choice="auto",
                     temperature=self.temperature,
+                    extra_body={
+                        "reasoning": {
+                            "effort": "low"
+                        }
+                    },
                 )
 
                 message = response.choices[0].message
+                reasoning_content = getattr(response.choices[0].message, 'reasoning', None)
                 
                 # Add assistant's reasoning/response to messages
                 assistant_content = message.content or ""
                 if assistant_content:
                     messages.append({"role": "assistant", "content": assistant_content})
-                    if message.tool_calls:
-                        self._add_activity("Reasoning", "success", assistant_content)
+                    #self._add_activity("Reasoning", "success", assistant_content)
+                    # if stream_callback:
+                    #     stream_callback({"type": "reasoning", "content": assistant_content})
+                if reasoning_content:
+                    logger.info(f"Reasoning: {reasoning_content}")
+                    reasoning_content = _summarize_reasoning(reasoning_content)
+                    self._add_activity("Reasoning", "success", reasoning_content)
                     if stream_callback:
-                        stream_callback({"type": "reasoning", "content": assistant_content})
+                        stream_callback({"type": "reasoning", "content": reasoning_content})
                 
                 # Prune messages to keep token usage reasonable before any next API call (TO-DO)
                 #messages = self._prune_messages(messages, max_messages=18)
@@ -536,11 +620,22 @@ class ReActAgent:
                             f"Calling tool: {tool_name} with args: {json.dumps(arguments)}",
                         )
                         
-                        if stream_callback:
-                            stream_callback({"type": "action", "tool": tool_name, "arguments": arguments})
-
                         # Execute tool
                         tool_result = self._execute_tool(tool_name, arguments)
+                        
+                        if stream_callback:
+                            # Check if tool execution was successful for the action event
+                            is_tool_success = True
+                            if isinstance(tool_result, dict) and "error" in tool_result:
+                                is_tool_success = False
+                            
+                            stream_callback({
+                                "type": "action", 
+                                "tool": tool_name, 
+                                "arguments": arguments,
+                                "status": "success" if is_tool_success else "error",
+                                "message": tool_result.get("error") if isinstance(tool_result, dict) else None
+                            })
 
                         # Add tool result to messages
                         messages.append(
@@ -556,9 +651,28 @@ class ReActAgent:
                             "success",
                             f"Tool {tool_name} returned successfully",
                         )
+                        logger.info(f"Tool {tool_name} was called with arguments: {json.dumps(arguments)} and returned: {tool_result}")
                         
                         if stream_callback:
                             stream_callback({"type": "observation", "tool": tool_name, "result": tool_result})
+                            
+                            # Emit roster update if the tool modified the roster
+                            if tool_name in ["add_player_to_roster", "remove_player_from_roster"]:
+                                # We need to check if the tool result indicates success
+                                is_success = False
+                                if isinstance(tool_result, dict):
+                                    is_success = tool_result.get("success", False)
+                                elif isinstance(tool_result, str):
+                                    try:
+                                        res_dict = json.loads(tool_result)
+                                        is_success = res_dict.get("success", False)
+                                    except:
+                                        pass
+                                
+                                if is_success:
+                                    roster_data = self._call_api("GET", f"/roster/{self.session_id}")
+                                    if isinstance(roster_data, dict) and "players" in roster_data:
+                                        stream_callback({"type": "roster_update", "players": roster_data["players"]})
 
                 else:
                     # No tool calls, agent is done

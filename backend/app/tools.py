@@ -95,6 +95,7 @@ def tool_get_cached_player_stats() -> Tuple[List[PlayerProfile], Dict[int, Dict[
 
 def search_roster_players(
     session_id: str,
+    search_budget: float = 200.0,
     budget: float = 200.0,
     count: int = 1,
 ) -> Dict[str, Any]:
@@ -110,7 +111,7 @@ def search_roster_players(
     
     # Calculate remaining budget
     total_cost = sum(p.get("dollar_value", 0.0) for p in current_players)
-    remaining_budget = budget - total_cost
+    remaining_budget = search_budget - total_cost
     
     # Use the count provided by the LLM agent
     if count <= 0:

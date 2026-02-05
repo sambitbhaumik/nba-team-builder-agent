@@ -7,6 +7,7 @@ import {
   Download,
   GripVertical,
   Lightbulb,
+  Loader2,
   PanelRight,
   Send,
   Trash2,
@@ -236,65 +237,165 @@ export default function App() {
     setIsLoading(true);
     
     try {
-      const response = await fetch("http://localhost:8000/agent/execute", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          goal: userInput.trim(),
-          budget: budgetTotal,
-          session_id: sessionId,
-          dry_run: false,
-        }),
-      });
+      const response = await fetch(`http://localhost:8000/agent/stream?goal=${encodeURIComponent(userInput.trim())}&budget=${budgetTotal}&session_id=${sessionId}`);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       
-      const data = await response.json();
-      console.log("Model response:", data);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No reader available");
       
-      // Update session ID if provided
-      if (data.session_id && data.session_id !== sessionId) {
-        setSessionId(data.session_id);
-        localStorage.setItem("sport_agent_session_id", data.session_id);
-      }
+      const decoder = new TextDecoder();
+      let assistantMsgId = `a-${Date.now()}`;
+      let fullContent = "";
+      let trace: TraceStep[] = [];
       
-      // Convert activity log to trace steps
-      const trace: TraceStep[] = (data.activity_log || []).map((activity: any) => ({
-        action: activity.step || activity.action || "",
-        status: activity.status === "success" ? "success" : activity.status === "error" ? "fail" : "pending",
-        detail: activity.detail || "",
-      }));
-      
-      // Combine all reasoning and actions into a single message
-      const reasoningContent = data.activity_log
-        ?.filter((a: any) => a.step === "Reasoning" && a.detail)
-        .map((a: any) => a.detail)
-        .join("\n\n") || "";
-      
-      const assistantMsg: Message = {
-        id: `a-${Date.now()}`,
-        role: "assistant",
-        content: data.message || reasoningContent || "Task completed.",
-        trace,
-        knowledgeHint: data.knowledge_used?.length > 0 
-          ? `Used preferences: ${data.knowledge_used.join(", ")}`
-          : undefined,
-      };
-      
-      setMessages((prev) => [...prev, assistantMsg]);
-      
-      // Update roster if provided
-      if (data.roster?.players && data.roster.players.length > 0) {
-        console.log("Roster update received:", data.roster.players);
-        updateRosterFromBackend(data.roster.players);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+        
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              console.log("Stream event:", data);
+              
+              if (data.type === "reasoning") {
+                fullContent += (fullContent ? "\n\n" : "") + data.content;
+                // Add reasoning to trace to match old activity log
+                trace.push({
+                  action: "Reasoning",
+                  status: "success",
+                  detail: data.content,
+                });
+                setMessages((prev) => {
+                  const otherMsgs = prev.filter((m) => m.id !== assistantMsgId);
+                  const existingMsg = prev.find((m) => m.id === assistantMsgId);
+                  return [
+                    ...otherMsgs,
+                    {
+                      id: assistantMsgId,
+                      role: "assistant",
+                      content: fullContent,
+                      trace: [...trace],
+                      knowledgeHint: existingMsg?.knowledgeHint,
+                    },
+                  ];
+                });
+              } else if (data.type === "action") {
+                const isError = data.status === "error" || data.status === "fail";
+                trace.push({
+                  action: "Action",
+                  status: isError ? "fail" : "pending",
+                  detail: isError 
+                    ? (data.message || `Error calling tool: ${data.tool}`)
+                    : `Calling tool: ${data.tool} with args: ${JSON.stringify(data.arguments)}`,
+                });
+                setMessages((prev) => {
+                  const otherMsgs = prev.filter((m) => m.id !== assistantMsgId);
+                  const existingMsg = prev.find((m) => m.id === assistantMsgId);
+                  return [
+                    ...otherMsgs,
+                    {
+                      id: assistantMsgId,
+                      role: "assistant",
+                      content: fullContent || "Thinking...",
+                      trace: [...trace],
+                      knowledgeHint: existingMsg?.knowledgeHint,
+                    },
+                  ];
+                });
+              } else if (data.type === "observation") {
+                const lastIdx = trace.length - 1;
+                if (lastIdx >= 0) {
+                  const isError = data.result?.error || (typeof data.result === "string" && data.result.includes("error"));
+                  trace[lastIdx] = {
+                    ...trace[lastIdx],
+                    status: isError ? "fail" : "success",
+                    detail: isError 
+                      ? (data.result?.error || data.result)
+                      : (data.result?.message || `Tool ${data.tool} returned successfully`),
+                  };
+                  
+                  // Add an explicit "Observation" step to match the old activity log style if desired,
+                  // or just update the existing "Action" step to look like the old log.
+                  // The old log had: step: "Action", status: "info", detail: "Calling tool..."
+                  // and step: "Observation", status: "success", detail: "Tool ... returned successfully"
+                  
+                  // Let's adjust the trace to exactly match the backend activity log structure
+                  trace[lastIdx].action = "Action";
+                  trace[lastIdx].status = "success"; // info maps to success in UI colors mostly
+                  
+                  trace.push({
+                    action: "Observation",
+                    status: isError ? "fail" : "success",
+                    detail: isError 
+                      ? (data.result?.error || data.result)
+                      : (data.result?.message || `Tool ${data.tool} returned successfully`),
+                  });
+
+                  setMessages((prev) => {
+                    const otherMsgs = prev.filter((m) => m.id !== assistantMsgId);
+                    const existingMsg = prev.find((m) => m.id === assistantMsgId);
+                    return [
+                      ...otherMsgs,
+                      {
+                        id: assistantMsgId,
+                        role: "assistant",
+                        content: fullContent || "Thinking...",
+                        trace: [...trace],
+                        knowledgeHint: existingMsg?.knowledgeHint,
+                      },
+                    ];
+                  });
+                }
+              } else if (data.type === "roster_update") {
+                console.log("Real-time roster update:", data.players);
+                updateRosterFromBackend(data.players);
+              } else if (data.type === "complete") {
+                const result = data.result;
+                if (result.session_id && result.session_id !== sessionId) {
+                  setSessionId(result.session_id);
+                  localStorage.setItem("sport_agent_session_id", result.session_id);
+                }
+                
+                // Final content update if provided
+                if (result.message && result.message !== fullContent) {
+                  setMessages((prev) => {
+                    const otherMsgs = prev.filter((m) => m.id !== assistantMsgId);
+                    return [
+                      ...otherMsgs,
+                      {
+                        id: assistantMsgId,
+                        role: "assistant",
+                        content: result.message,
+                        trace: [...trace],
+                        knowledgeHint: result.knowledge_used?.length > 0 
+                          ? `Used preferences: ${result.knowledge_used.join(", ")}`
+                          : undefined,
+                      },
+                    ];
+                  });
+                }
+              } else if (data.type === "error") {
+                throw new Error(data.message);
+              }
+            } catch (e) {
+              console.error("Error parsing stream chunk:", e, line);
+            }
+          }
+        }
+        scrollToBottom();
       }
       
     } catch (error) {
       console.error("Error calling agent:", error);
       const errorMsg: Message = {
-        id: `a-${Date.now()}`,
+        id: `err-${Date.now()}`,
         role: "assistant",
         content: `Error: ${error instanceof Error ? error.message : "Failed to communicate with agent"}`,
         trace: [{ action: "Error", status: "fail", detail: String(error) }],
@@ -554,12 +655,12 @@ export default function App() {
                   onClick={() => toggleTrace(msg.id)}
                   className="mb-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
                 >
-                  {expandedTraces[msg.id] ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                  {expandedTraces[msg.id] || (isLoading && msg.id === messages[messages.length - 1].id) ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                   Show reasoning
                 </button>
               )}
 
-              {msg.trace && expandedTraces[msg.id] && (
+              {msg.trace && (expandedTraces[msg.id] || (isLoading && msg.id === messages[messages.length - 1].id)) && (
                 <div className="mb-2 space-y-1 rounded-md border border-border bg-muted/50 p-3 text-xs">
                   {msg.trace.map((step, i) => (
                     <div key={i} className="flex items-start gap-2">
@@ -591,30 +692,37 @@ export default function App() {
                 {msg.role === "user" ? (
                   msg.content
                 ) : (
-                  <ReactMarkdown 
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      table: ({ children }) => (
-                        <div className="overflow-x-auto my-2">
-                          <table className="w-full border-collapse border border-border text-xs">
-                            {children}
-                          </table>
-                        </div>
-                      ),
-                      thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
-                      th: ({ children }) => <th className="border border-border px-2 py-1 text-left font-bold">{children}</th>,
-                      td: ({ children }) => <td className="border border-border px-2 py-1">{children}</td>,
-                      p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                      ul: ({ children }) => <ul className="list-disc ml-4 mb-2">{children}</ul>,
-                      ol: ({ children }) => <ol className="list-decimal ml-4 mb-2">{children}</ol>,
-                      li: ({ children }) => <li className="mb-1">{children}</li>,
-                      strong: ({ children }) => <strong className="font-bold">{children}</strong>,
-                      em: ({ children }) => <em className="italic">{children}</em>,
-                      code: ({ children }) => <code className="bg-muted px-1 rounded text-xs">{children}</code>,
-                    }}
-                  >
-                    {msg.content}
-                  </ReactMarkdown>
+                  isLoading && msg.id === messages[messages.length - 1].id ? (
+                    <div className="flex items-center gap-2 py-1">
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      <span className="text-muted-foreground italic">Thinking...</span>
+                    </div>
+                  ) : (
+                    <ReactMarkdown 
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        table: ({ children }) => (
+                          <div className="overflow-x-auto my-2">
+                            <table className="w-full border-collapse border border-border text-xs">
+                              {children}
+                            </table>
+                          </div>
+                        ),
+                        thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
+                        th: ({ children }) => <th className="border border-border px-2 py-1 text-left font-bold">{children}</th>,
+                        td: ({ children }) => <td className="border border-border px-2 py-1">{children}</td>,
+                        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                        ul: ({ children }) => <ul className="list-disc ml-4 mb-2">{children}</ul>,
+                        ol: ({ children }) => <ol className="list-decimal ml-4 mb-2">{children}</ol>,
+                        li: ({ children }) => <li className="mb-1">{children}</li>,
+                        strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+                        em: ({ children }) => <em className="italic">{children}</em>,
+                        code: ({ children }) => <code className="bg-muted px-1 rounded text-xs">{children}</code>,
+                      }}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
+                  )
                 )}
               </div>
 

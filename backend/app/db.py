@@ -189,10 +189,13 @@ def get_session_roster(session_id: str) -> Dict[str, Any]:
                 "total_cost": 0.0,
             }
         roster_data = json.loads(row["roster_json"])
+        total_cost = sum(p.get("dollar_value", 0.0) for p in roster_data.get("players", []))
+        remaining_budget = float(row["budget"]) - total_cost
         return {
             "players": roster_data.get("players", []),
             "budget": float(row["budget"]),
-            "total_cost": sum(p.get("dollar_value", 0.0) for p in roster_data.get("players", [])),
+            "total_cost": total_cost,
+            "remaining_budget": remaining_budget,
         }
 
 
