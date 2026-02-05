@@ -57,7 +57,6 @@ def init_db() -> None:
                 session_id TEXT PRIMARY KEY,
                 roster_json TEXT NOT NULL,
                 budget REAL NOT NULL DEFAULT 200.0,
-                slots INTEGER NOT NULL DEFAULT 12,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             )
@@ -180,21 +179,19 @@ def get_session_roster(session_id: str) -> Dict[str, Any]:
     """Get current roster for a session."""
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT roster_json, budget, slots FROM session_rosters WHERE session_id = ?",
+            "SELECT roster_json, budget FROM session_rosters WHERE session_id = ?",
             (session_id,),
         ).fetchone()
         if not row:
             return {
                 "players": [],
                 "budget": 200.0,
-                "slots": 12,
                 "total_cost": 0.0,
             }
         roster_data = json.loads(row["roster_json"])
         return {
             "players": roster_data.get("players", []),
             "budget": float(row["budget"]),
-            "slots": int(row["slots"]),
             "total_cost": sum(p.get("dollar_value", 0.0) for p in roster_data.get("players", [])),
         }
 
@@ -203,7 +200,6 @@ def update_session_roster(
     session_id: str,
     players: List[Dict[str, Any]],
     budget: float = 200.0,
-    slots: int = 12,
 ) -> None:
     """Update roster for a session."""
     from datetime import datetime, timezone
@@ -219,18 +215,18 @@ def update_session_roster(
             conn.execute(
                 """
                 UPDATE session_rosters
-                SET roster_json = ?, budget = ?, slots = ?, updated_at = ?
+                SET roster_json = ?, budget = ?, updated_at = ?
                 WHERE session_id = ?
                 """,
-                (roster_json, budget, slots, now, session_id),
+                (roster_json, budget, now, session_id),
             )
         else:
             conn.execute(
                 """
-                INSERT INTO session_rosters (session_id, roster_json, budget, slots, updated_at)
+                INSERT INTO session_rosters (session_id, roster_json, budget, updated_at)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (session_id, roster_json, budget, slots, now),
+                (session_id, roster_json, budget, now),
             )
         conn.commit()
 

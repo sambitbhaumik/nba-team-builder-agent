@@ -109,7 +109,7 @@ def score_player(stats: Dict[str, float], preferences: List[str]) -> float:
 def optimize_roster(
     players: List[PlayerValue],
     budget: float,
-    slots: int,
+    count: int,
 ) -> Tuple[List[PlayerValue], float]:
     if not players:
         return [], 0.0
@@ -117,16 +117,16 @@ def optimize_roster(
     roster: List[PlayerValue] = []
     total_cost = 0.0
     for player in sorted_players:
-        if len(roster) >= slots:
+        if len(roster) >= count:
             break
         if total_cost + player.dollar_value <= budget:
             roster.append(player)
             total_cost += player.dollar_value
-    if len(roster) < slots:
+    if len(roster) < count:
         remaining = [p for p in players if p not in roster]
         remaining.sort(key=lambda p: p.dollar_value)
         for player in remaining:
-            if len(roster) >= slots:
+            if len(roster) >= count:
                 break
             if total_cost + player.dollar_value <= budget:
                 roster.append(player)

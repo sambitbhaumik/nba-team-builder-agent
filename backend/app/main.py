@@ -18,19 +18,19 @@ from .schemas import (
     AgentActivity,
     AgentExecuteRequest,
     AgentExecuteResponse,
-    CalculateValuesRequest,
-    CalculateValuesResponse,
+    # CalculateValuesRequest,
+    # CalculateValuesResponse,
     CurrentRoster,
     FetchPlayerStatsResponse,
     GenerateReportRequest,
     GenerateReportResponse,
     KnowledgeAddRequest,
     KnowledgeQueryResponse,
-    OptimizeRosterFromValuesRequest,
-    OptimizeRosterFromValuesResponse,
+    # OptimizeRosterFromValuesRequest,
+    # OptimizeRosterFromValuesResponse,
     OptimizeRosterRequest,
     PlayerProfileResponse,
-    PlayerSearchRequest,
+    # PlayerSearchRequest,
     PlayerStat,
     PlayerValueResponse,
     RosterPlayer,
@@ -44,12 +44,10 @@ from .tools import (
     get_current_roster,
     get_player_details,
     remove_player_from_roster,
-    search_players,
-    tool_calculate_values,
+    search_roster_players,
     tool_fetch_player_stats,
     tool_generate_report,
     tool_get_cached_player_stats,
-    tool_optimize_roster,
 )
 
 
@@ -310,104 +308,104 @@ def api_get_cached_player_stats() -> FetchPlayerStatsResponse:
     )
 
 
-@app.post("/tools/calculate-values", response_model=CalculateValuesResponse)
-def api_calculate_values(request: CalculateValuesRequest) -> CalculateValuesResponse:
-    """
-    Calculate fantasy values for players based on stats and preferences.
-    Uses cached player stats if players/stats_by_id are not provided.
-    """
-    from .nba import PlayerProfile
-    
-    # Use cached data if players/stats not provided
-    if request.players is None or request.stats_by_id is None:
-        players, stats_by_id = tool_get_cached_player_stats()
-        if not players:
-            raise HTTPException(
-                status_code=404,
-                detail="No cached player data available. Please refresh player stats first using /tools/fetch-player-stats"
-            )
-    else:
-        # Convert PlayerProfileResponse back to PlayerProfile
-        players = [
-            PlayerProfile(
-                player_id=p.player_id,
-                full_name=p.full_name,
-                team=p.team,
-                position=p.position,
-            )
-            for p in request.players
-        ]
-        stats_by_id = request.stats_by_id
-    
-    valued_players = tool_calculate_values(
-        players,
-        stats_by_id,
-        request.preferences,
-        request.budget,
-    )
-    
-    player_values = [
-        PlayerValueResponse(
-            player_id=p.player_id,
-            name=p.name,
-            team=p.team,
-            position=p.position,
-            stats=p.stats,
-            fpg=p.fpg,
-            dollar_value=p.dollar_value,
-            score=p.score,
-        )
-        for p in valued_players
-    ]
-    
-    return CalculateValuesResponse(valued_players=player_values)
+# @app.post("/tools/calculate-values", response_model=CalculateValuesResponse)
+# def api_calculate_values(request: CalculateValuesRequest) -> CalculateValuesResponse:
+#     """
+#     Calculate fantasy values for players based on stats and preferences.
+#     Uses cached player stats if players/stats_by_id are not provided.
+#     """
+#     from .nba import PlayerProfile
+#     
+#     # Use cached data if players/stats not provided
+#     if request.players is None or request.stats_by_id is None:
+#         players, stats_by_id = tool_get_cached_player_stats()
+#         if not players:
+#             raise HTTPException(
+#                 status_code=404,
+#                 detail="No cached player data available. Please refresh player stats first using /tools/fetch-player-stats"
+#             )
+#     else:
+#         # Convert PlayerProfileResponse back to PlayerProfile
+#         players = [
+#             PlayerProfile(
+#                 player_id=p.player_id,
+#                 full_name=p.full_name,
+#                 team=p.team,
+#                 position=p.position,
+#             )
+#             for p in request.players
+#         ]
+#         stats_by_id = request.stats_by_id
+#     
+#     valued_players = tool_calculate_values(
+#         players,
+#         stats_by_id,
+#         request.preferences,
+#         request.budget,
+#     )
+#     
+#     player_values = [
+#         PlayerValueResponse(
+#             player_id=p.player_id,
+#             name=p.name,
+#             team=p.team,
+#             position=p.position,
+#             stats=p.stats,
+#             fpg=p.fpg,
+#             dollar_value=p.dollar_value,
+#             score=p.score,
+#         )
+#         for p in valued_players
+#     ]
+#     
+#     return CalculateValuesResponse(valued_players=player_values)
 
 
-@app.post("/tools/optimize-roster-from-values", response_model=OptimizeRosterFromValuesResponse)
-def api_optimize_roster_from_values(request: OptimizeRosterFromValuesRequest) -> OptimizeRosterFromValuesResponse:
-    """
-    Optimize roster from a list of valued players.
-    This can be enhanced with LLM agent capabilities for intelligent roster optimization.
-    """
-    # Convert PlayerValueResponse back to PlayerValue
-    player_values = [
-        PlayerValue(
-            player_id=p.player_id,
-            name=p.name,
-            team=p.team,
-            position=p.position,
-            stats=p.stats,
-            fpg=p.fpg,
-            dollar_value=p.dollar_value,
-            score=p.score,
-        )
-        for p in request.players
-    ]
-    
-    optimized_roster, total_cost = tool_optimize_roster(
-        player_values,
-        request.budget,
-        request.slots,
-    )
-    
-    optimized_player_values = [
-        PlayerValueResponse(
-            player_id=p.player_id,
-            name=p.name,
-            team=p.team,
-            position=p.position,
-            stats=p.stats,
-            fpg=p.fpg,
-            dollar_value=p.dollar_value,
-            score=p.score,
-        )
-        for p in optimized_roster
-    ]
-    
-    return OptimizeRosterFromValuesResponse(
-        optimized_roster=optimized_player_values,
-        total_cost=total_cost,
-    )
+# @app.post("/tools/optimize-roster-from-values", response_model=OptimizeRosterFromValuesResponse)
+# def api_optimize_roster_from_values(request: OptimizeRosterFromValuesRequest) -> OptimizeRosterFromValuesResponse:
+#     """
+#     Optimize roster from a list of valued players.
+#     This can be enhanced with LLM agent capabilities for intelligent roster optimization.
+#     """
+#     # Convert PlayerValueResponse back to PlayerValue
+#     player_values = [
+#         PlayerValue(
+#             player_id=p.player_id,
+#             name=p.name,
+#             team=p.team,
+#             position=p.position,
+#             stats=p.stats,
+#             fpg=p.fpg,
+#             dollar_value=p.dollar_value,
+#             score=p.score,
+#         )
+#         for p in request.players
+#     ]
+#     
+#     optimized_roster, total_cost = tool_optimize_roster(
+#         player_values,
+#         request.budget,
+#         request.slots,
+#     )
+#     
+#     optimized_player_values = [
+#         PlayerValueResponse(
+#             player_id=p.player_id,
+#             name=p.name,
+#             team=p.team,
+#             position=p.position,
+#             stats=p.stats,
+#             fpg=p.fpg,
+#             dollar_value=p.dollar_value,
+#             score=p.score,
+#         )
+#         for p in optimized_roster
+#     ]
+#     
+#     return OptimizeRosterFromValuesResponse(
+#         optimized_roster=optimized_player_values,
+#         total_cost=total_cost,
+#     )
 
 
 @app.post("/tools/generate-report", response_model=GenerateReportResponse)
@@ -447,9 +445,9 @@ def api_get_current_roster(session_id: str) -> CurrentRoster:
             name=p.get("name", ""),
             team=p.get("team"),
             position=p.get("position"),
-            fpg=p.get("fpg", 0.0),
-            dollar_value=p.get("dollar_value", 0.0),
-            score=p.get("score", 0.0),
+            fpg=round(p.get("fpg", 0.0), 2),
+            dollar_value=round(p.get("dollar_value", 0.0), 2),
+            score=round(p.get("score", 0.0), 2),
             starter=p.get("starter", False),
         )
         for p in roster_data.get("players", [])
@@ -458,29 +456,41 @@ def api_get_current_roster(session_id: str) -> CurrentRoster:
         players=players,
         total_cost=roster_data.get("total_cost", 0.0),
         budget=roster_data.get("budget", 200.0),
-        slots=roster_data.get("slots", 12),
-        slots_remaining=roster_data.get("slots_remaining", 12),
     )
 
 
-@app.get("/players/search")
-def api_search_players(
-    name: str,
+@app.get("/players/search-roster")
+def api_search_roster_players(
+    session_id: str,
     budget: float = 200.0,
-    limit: int = 20,
-) -> list[dict[str, Any]]:
-    """Search for players by name (partial match)."""
-    return search_players(
-        name=name,
+    count: int = 1,
+) -> dict[str, Any]:
+    """Search for players suitable for the roster. Returns a list of player IDs."""
+    return search_roster_players(
+        session_id=session_id,
         budget=budget,
-        limit=limit,
+        count=count,
     )
 
 
-@app.get("/players/{player_id}")
-def api_get_player_details(player_id: int, budget: float = 200.0) -> dict[str, Any]:
+# @app.get("/players/search")
+# def api_search_players(
+#     name: str,
+#     budget: float = 200.0,
+#     limit: int = 20,
+# ) -> list[dict[str, Any]]:
+#     """Search for players by name (partial match)."""
+#     return search_players(
+#         name=name,
+#         budget=budget,
+#         limit=limit,
+#     )
+
+
+@app.get("/players/{player_name}")
+def api_get_player_details(player_name: str, budget: float = 200.0) -> dict[str, Any]:
     """Get detailed information about a specific player."""
-    return get_player_details(player_id, budget)
+    return get_player_details(player_name, budget)
 
 
 @app.post("/roster/{session_id}/players")
@@ -493,17 +503,16 @@ def api_add_player_to_roster(
         session_id,
         request.player_id,
         request.budget or 200.0,
-        request.slots or 12,
     )
 
 
-@app.delete("/roster/{session_id}/players/{player_id}")
+@app.delete("/roster/{session_id}/players/{player_name}")
 def api_remove_player_from_roster(
     session_id: str,
-    player_id: int,
+    player_name: str,
 ) -> dict[str, Any]:
-    """Remove a player from the roster."""
-    return remove_player_from_roster(session_id, player_id)
+    """Remove a player from the roster by name."""
+    return remove_player_from_roster(session_id, player_name)
 
 
 # @app.get("/players/replacements")
@@ -524,75 +533,75 @@ def api_remove_player_from_roster(
 #     )
 
 
-@app.post("/roster/{session_id}/optimize")
-def api_optimize_roster(
-    session_id: str,
-    request: OptimizeRosterRequest | None = None,
-) -> dict[str, Any]:
-    """Optimize the roster using available players via API calls."""
-    import httpx
-    
-    # Get current roster to determine budget/slots if not provided
-    roster_data = get_current_roster(session_id)
-    if request is None:
-        request = OptimizeRosterRequest()
-    budget = request.budget if request.budget is not None else roster_data.get("budget", 200.0)
-    slots = request.slots if request.slots is not None else roster_data.get("slots", 12)
-    
-    preferences = load_preferences()
-    
-    # Call API to calculate values using cached player stats
-    api_base_url = os.getenv("API_BASE_URL", "http://localhost:8000")
-    with httpx.Client(timeout=60.0) as client:
-        # Calculate values (will use cached player stats automatically)
-        calculate_request = {
-            "preferences": preferences,
-            "budget": budget,
-        }
-        calculate_response = client.post(
-            f"{api_base_url}/tools/calculate-values",
-            json=calculate_request,
-        )
-        calculate_response.raise_for_status()
-        calculate_data = calculate_response.json()
-        
-        # Optimize roster
-        optimize_request = {
-            "players": calculate_data["valued_players"],
-            "budget": budget,
-            "slots": slots,
-        }
-        optimize_response = client.post(
-            f"{api_base_url}/tools/optimize-roster-from-values",
-            json=optimize_request,
-        )
-        optimize_response.raise_for_status()
-        optimize_data = optimize_response.json()
-    
-    # Convert to dict format
-    optimized_players = [
-        {
-            "player_id": p["player_id"],
-            "name": p["name"],
-            "team": p["team"],
-            "position": p["position"],
-            "stats": p["stats"],
-            "fpg": p["fpg"],
-            "dollar_value": p["dollar_value"],
-            "score": p["score"],
-        }
-        for p in optimize_data["optimized_roster"]
-    ]
-    
-    # Update session roster
-    from .db import update_session_roster
-    update_session_roster(session_id, optimized_players, budget, slots)
-    
-    return {
-        "success": True,
-        "roster": get_current_roster(session_id),
-        "total_cost": optimize_data["total_cost"],
-    }
+# @app.post("/roster/{session_id}/optimize")
+# def api_optimize_roster(
+#     session_id: str,
+#     request: OptimizeRosterRequest | None = None,
+# ) -> dict[str, Any]:
+#     """Optimize the roster using available players via API calls."""
+#     import httpx
+#     
+#     # Get current roster to determine budget/slots if not provided
+#     roster_data = get_current_roster(session_id)
+#     if request is None:
+#         request = OptimizeRosterRequest()
+#     budget = request.budget if request.budget is not None else roster_data.get("budget", 200.0)
+#     slots = request.slots if request.slots is not None else roster_data.get("slots", 12)
+#     
+#     preferences = load_preferences()
+#     
+#     # Call API to calculate values using cached player stats
+#     api_base_url = os.getenv("API_BASE_URL", "http://localhost:8000")
+#     with httpx.Client(timeout=60.0) as client:
+#         # Calculate values (will use cached player stats automatically)
+#         calculate_request = {
+#             "preferences": preferences,
+#             "budget": budget,
+#         }
+#         calculate_response = client.post(
+#             f"{api_base_url}/tools/calculate-values",
+#             json=calculate_request,
+#         )
+#         calculate_response.raise_for_status()
+#         calculate_data = calculate_response.json()
+#         
+#         # Optimize roster
+#         optimize_request = {
+#             "players": calculate_data["valued_players"],
+#             "budget": budget,
+#             "slots": slots,
+#         }
+#         optimize_response = client.post(
+#             f"{api_base_url}/tools/optimize-roster-from-values",
+#             json=optimize_request,
+#         )
+#         optimize_response.raise_for_status()
+#         optimize_data = optimize_response.json()
+#     
+#     # Convert to dict format
+#     optimized_players = [
+#         {
+#             "player_id": p["player_id"],
+#             "name": p["name"],
+#             "team": p["team"],
+#             "position": p["position"],
+#             "stats": p["stats"],
+#             "fpg": p["fpg"],
+#             "dollar_value": p["dollar_value"],
+#             "score": p["score"],
+#         }
+#         for p in optimize_data["optimized_roster"]
+#     ]
+#     
+#     # Update session roster
+#     from .db import update_session_roster
+#     update_session_roster(session_id, optimized_players, budget, slots)
+#     
+#     return {
+#         "success": True,
+#         "roster": get_current_roster(session_id),
+#         "total_cost": optimize_data["total_cost"],
+#     }
 
 
 @app.post("/roster/{session_id}/report")

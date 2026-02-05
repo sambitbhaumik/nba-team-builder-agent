@@ -84,8 +84,6 @@ class CurrentRoster(BaseModel):
     players: List[RosterPlayer] = Field(default_factory=list)
     total_cost: float = 0.0
     budget: float = 200.0
-    slots: int = 12
-    slots_remaining: int = 12
 
 
 class PlayerSearchRequest(BaseModel):
@@ -106,12 +104,10 @@ class AgentToolResult(BaseModel):
 class AddPlayerRequest(BaseModel):
     player_id: int
     budget: Optional[float] = 200.0
-    slots: Optional[int] = 12
 
 
 class OptimizeRosterRequest(BaseModel):
     budget: Optional[float] = None
-    slots: Optional[int] = None
 
 
 class PlayerProfileResponse(BaseModel):
@@ -152,7 +148,6 @@ class CalculateValuesResponse(BaseModel):
 class OptimizeRosterFromValuesRequest(BaseModel):
     players: List[PlayerValueResponse]
     budget: float
-    slots: int
 
 
 class OptimizeRosterFromValuesResponse(BaseModel):

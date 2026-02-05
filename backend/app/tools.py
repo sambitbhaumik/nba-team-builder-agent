@@ -93,21 +93,61 @@ def tool_get_cached_player_stats() -> Tuple[List[PlayerProfile], Dict[int, Dict[
     return [], {}
 
 
-def tool_calculate_values(
-    players: List[PlayerProfile],
-    stats_by_id: Dict[int, Dict[str, float]],
-    preferences: List[str],
-    budget: float,
-) -> List[PlayerValue]:
-    valued: List[PlayerValue] = []
+def search_roster_players(
+    session_id: str,
+    budget: float = 200.0,
+    count: int = 1,
+) -> Dict[str, Any]:
+    """
+    Search for players suitable for the roster.
+    Combines calculation, optimization, and filtering to find the best players.
+    Returns a list of player IDs that fit the remaining budget.
+    """
+    # Get current roster to determine remaining budget
+    roster_data = get_current_roster(session_id)
+    current_players = roster_data.get("players", [])
+    current_player_ids = {p.get("player_id") for p in current_players}
+    
+    # Calculate remaining budget
+    total_cost = sum(p.get("dollar_value", 0.0) for p in current_players)
+    remaining_budget = budget - total_cost
+    
+    # Use the count provided by the LLM agent
+    if count <= 0:
+        return {
+            "success": False,
+            "error": "Count must be greater than 0",
+            "player_ids": [],
+        }
+    
+    # Fetch cached player stats
+    players, stats_by_id = tool_get_cached_player_stats()
+    if not players:
+        return {
+            "success": False,
+            "error": "No cached player data available. Please refresh player stats first.",
+            "player_ids": [],
+        }
+    
+    # Load user preferences
+    preferences = load_preferences()
+    
+    # Calculate values for all players (excluding those already in roster)
+    valued_players: List[PlayerValue] = []
     for player in players:
+        # Skip players already in roster
+        if player.player_id in current_player_ids:
+            continue
+        
         stats = stats_by_id.get(str(player.player_id)) or {}
         if not stats:
             continue
+        
         fpg = fantasy_points_per_game(stats)
         value = dollar_value(fpg, budget=budget)
         score = score_player(stats, preferences)
-        valued.append(
+        
+        valued_players.append(
             PlayerValue(
                 player_id=player.player_id,
                 name=player.full_name,
@@ -120,15 +160,25 @@ def tool_calculate_values(
                 starter=False,
             )
         )
-    return valued
-
-
-def tool_optimize_roster(
-    players: List[PlayerValue],
-    budget: float,
-    slots: int,
-) -> Tuple[List[PlayerValue], float]:
-    return optimize_roster(players, budget, slots)
+    
+    if not valued_players:
+        return {
+            "success": False,
+            "error": "No available players found",
+            "player_ids": [],
+        }
+    
+    # Optimize roster to find the best players that fit remaining budget
+    optimized_roster, _ = optimize_roster(valued_players, remaining_budget, count)
+    
+    # Extract player IDs
+    player_ids = [p.player_id for p in optimized_roster]
+    
+    return {
+        "success": True,
+        "player_ids": player_ids,
+        "count": len(player_ids),
+    }
 
 
 def tool_generate_report(roster: List[PlayerValue]) -> str:
@@ -226,7 +276,7 @@ def add_player_to_roster(
         "starter": len(current_players) < 5,
     }
     current_players.append(new_player)
-    update_session_roster(session_id, current_players, budget, slots)
+    update_session_roster(session_id, current_players, budget)
     
     return {
         "success": True,
@@ -235,80 +285,41 @@ def add_player_to_roster(
     }
 
 
-def remove_player_from_roster(session_id: str, player_id: int) -> Dict[str, Any]:
-    """Remove a player from the roster. Returns updated roster state."""
+def remove_player_from_roster(session_id: str, player_name: str) -> Dict[str, Any]:
+    """Remove a player from the roster by name. Returns updated roster state."""
     roster_data = get_session_roster(session_id)
     current_players = roster_data["players"]
     
-    # Find and remove player
-    updated_players = [p for p in current_players if p.get("player_id") != player_id]
+    # Find and remove player by name (case-insensitive)
+    updated_players = [p for p in current_players if p.get("name", "").lower() != player_name.lower()]
     
     if len(updated_players) == len(current_players):
-        return {"success": False, "error": "Player not in roster", "roster": roster_data}
+        return {"success": False, "error": f"Player '{player_name}' not in roster", "roster": roster_data}
     
     # Update starter status for remaining players
     for i, p in enumerate(updated_players):
         p["starter"] = i < 5
     
-    player_name = next((p.get("name") for p in current_players if p.get("player_id") == player_id), "Unknown")
-    update_session_roster(session_id, updated_players, roster_data["budget"], roster_data["slots"])
+    update_session_roster(session_id, updated_players, roster_data["budget"])
     
     return {
         "success": True,
         "message": f"Removed {player_name} from roster",
-        #"roster": get_session_roster(session_id),
     }
 
 
-def search_players(
-    name: str,
-    budget: float = 200.0,
-    limit: int = 20,
-) -> List[Dict[str, Any]]:
-    """Search for players by name (partial match)."""
-    players, stats_by_id = tool_get_cached_player_stats()
-    preferences = load_preferences()
-    
-    results = []
-    for player in players:
-        stats = stats_by_id.get(str(player.player_id)) or {}
-        if not stats:
-            continue
-        
-        # Apply name filter
-        if name.lower() not in player.full_name.lower():
-            continue
-        
-        fpg = fantasy_points_per_game(stats)
-        value = dollar_value(fpg, budget=budget)
-        score = score_player(stats, preferences)
-        results.append({
-            "player_id": player.player_id,
-            "name": player.full_name,
-            "team": player.team or "",
-            "position": player.position or "",
-            "fpg": fpg,
-            "dollar_value": value,
-            "score": score,
-            "starter": False,
-        })
-        
-        if len(results) >= limit:
-            break
-    
-    # Sort by score
-    results.sort(key=lambda x: x["score"], reverse=True)
-    return results
 
 
-def get_player_details(player_id: int, budget: float = 200.0) -> Dict[str, Any]:
+def get_player_details(player_name: str, budget: float = 200.0) -> Dict[str, Any]:
     """Get detailed information about a specific player."""
     players, stats_by_id = tool_get_cached_player_stats()
-    player_profile = next((p for p in players if p.player_id == player_id), None)
+    # Find player by name (case-insensitive)
+    player_profile = next((p for p in players if p.full_name.lower() == player_name.lower()), None)
     
     if not player_profile:
-        return {"success": False, "error": "Player not found"}
+        return {"success": False, "error": f"Player '{player_name}' not found"}
     
+    player_id = player_profile.player_id
     stats = stats_by_id.get(str(player_id)) or {}
     if not stats:
         return {"success": False, "error": "Player stats not available"}
@@ -325,20 +336,20 @@ def get_player_details(player_id: int, budget: float = 200.0) -> Dict[str, Any]:
         "team": player_profile.team or "",
         "position": player_profile.position or "",
         "stats": stats,
-        "fpg": fpg,
-        "dollar_value": value,
-        "score": score,
+        "fpg": round(fpg, 2),
+        "dollar_value": round(value, 2),
+        "score": round(score, 2),
         "starter": False,
     }
 
 
-def find_replacements(
-    position: Optional[str] = None,
-    exclude_player_ids: Optional[List[int]] = None,
-    budget: float = 200.0,
-    max_cost: Optional[float] = None,
-    limit: int = 10,
-) -> List[Dict[str, Any]]:
+# def find_replacements(
+#     position: Optional[str] = None,
+#     exclude_player_ids: Optional[List[int]] = None,
+#     budget: float = 200.0,
+#     max_cost: Optional[float] = None,
+#     limit: int = 10,
+# ) -> List[Dict[str, Any]]:
     """Find replacement players, optionally for a specific position."""
     players, stats_by_id = tool_get_cached_player_stats()
     preferences = load_preferences()

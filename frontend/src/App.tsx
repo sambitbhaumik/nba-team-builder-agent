@@ -12,6 +12,8 @@ import {
   Trash2,
   WandSparkles,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
@@ -152,7 +154,7 @@ export default function App() {
     .filter(Boolean) as Player[];
 
   const budgetUsed = rosterPlayers.reduce((sum, p) => sum + p.value, 0);
-  const budgetTotal = 150;
+  const budgetTotal = 200;
   const budgetRatio = Math.min(budgetUsed / budgetTotal, 1);
   const hasRoster = rosterPlayers.length > 0;
 
@@ -582,11 +584,38 @@ export default function App() {
                 className={cn(
                   "rounded-2xl px-4 py-3 text-sm leading-relaxed",
                   msg.role === "user"
-                    ? "bg-primary text-primary-foreground"
+                    ? "bg-primary text-primary-foreground whitespace-pre-wrap"
                     : "bg-secondary text-secondary-foreground"
                 )}
               >
-                {msg.content}
+                {msg.role === "user" ? (
+                  msg.content
+                ) : (
+                  <ReactMarkdown 
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      table: ({ children }) => (
+                        <div className="overflow-x-auto my-2">
+                          <table className="w-full border-collapse border border-border text-xs">
+                            {children}
+                          </table>
+                        </div>
+                      ),
+                      thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
+                      th: ({ children }) => <th className="border border-border px-2 py-1 text-left font-bold">{children}</th>,
+                      td: ({ children }) => <td className="border border-border px-2 py-1">{children}</td>,
+                      p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                      ul: ({ children }) => <ul className="list-disc ml-4 mb-2">{children}</ul>,
+                      ol: ({ children }) => <ol className="list-decimal ml-4 mb-2">{children}</ol>,
+                      li: ({ children }) => <li className="mb-1">{children}</li>,
+                      strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+                      em: ({ children }) => <em className="italic">{children}</em>,
+                      code: ({ children }) => <code className="bg-muted px-1 rounded text-xs">{children}</code>,
+                    }}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
+                )}
               </div>
 
               {msg.knowledgeHint && (
