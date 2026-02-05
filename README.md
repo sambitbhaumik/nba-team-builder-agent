@@ -1,6 +1,9 @@
 # NBA Fantasy Team Builder Agent
 
-A full-stack application for building and managing NBA fantasy rosters using intelligent AI agents.
+A full-stack application for building and managing NBA fantasy rosters using intelligent AI agents. 
+
+** More details as well as installation setup to be published
+
 
 ## Tech Stack
 
