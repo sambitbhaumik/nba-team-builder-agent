@@ -311,6 +311,18 @@ def remove_player_from_roster(session_id: str, player_name: str) -> Dict[str, An
 
 
 
+def update_roster_budget(session_id: str, budget: float) -> Dict[str, Any]:
+    """Update the budget for a session's roster."""
+    roster_data = get_session_roster(session_id)
+    players = roster_data.get("players", [])
+    update_session_roster(session_id, players, budget)
+    return {
+        "success": True,
+        "message": f"Updated budget to {budget}",
+        "new_budget": budget
+    }
+
+
 def get_player_details(player_name: str, budget: float = 200.0) -> Dict[str, Any]:
     """Get detailed information about a specific player."""
     players, stats_by_id = tool_get_cached_player_stats()

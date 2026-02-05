@@ -160,6 +160,10 @@ class GenerateReportRequest(BaseModel):
     roster: List[PlayerValueResponse]
 
 
+class UpdateBudgetRequest(BaseModel):
+    budget: float
+
+
 class GenerateReportResponse(BaseModel):
     success: bool
     report_path: Optional[str] = None

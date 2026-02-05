@@ -186,6 +186,23 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_roster_budget",
+            "description": "Modify the budget allotted for the current roster.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "budget": {
+                        "type": "number",
+                        "description": "The new budget amount (float) allotted for the roster.",
+                    },
+                },
+                "required": ["budget"],
+            },
+        },
+    },
     # {
     #     "type": "function",
     #     "function": {
@@ -325,6 +342,8 @@ class ReActAgent:
                     response = client.get(url, params=params)
                 elif method == "POST":
                     response = client.post(url, params=params, json=json_data)
+                elif method == "PATCH":
+                    response = client.patch(url, params=params, json=json_data)
                 elif method == "DELETE":
                     response = client.delete(url, params=params)
                 else:
@@ -420,6 +439,18 @@ class ReActAgent:
                     "Tool: remove_player_from_roster",
                     "success" if result.get("success") else "error",
                     result.get("error", result.get("message", "Player removed successfully")),
+                )
+                return result
+
+            elif tool_name == "update_roster_budget":
+                json_data = {
+                    "budget": arguments["budget"],
+                }
+                result = self._call_api("PATCH", f"/roster/{self.session_id}/budget", json_data=json_data)
+                self._add_activity(
+                    "Tool: update_roster_budget",
+                    "success" if result.get("success") else "error",
+                    result.get("error", result.get("message", "Budget updated successfully")),
                 )
                 return result
 

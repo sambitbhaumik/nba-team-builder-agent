@@ -38,6 +38,7 @@ from .schemas import (
     RosterResult,
     TeamListResponse,
     TeamSaveRequest,
+    UpdateBudgetRequest,
 )
 from .tools import (
     add_player_to_roster,
@@ -49,6 +50,7 @@ from .tools import (
     tool_fetch_player_stats,
     tool_generate_report,
     tool_get_cached_player_stats,
+    update_roster_budget,
 )
 
 
@@ -515,6 +517,15 @@ def api_remove_player_from_roster(
 ) -> dict[str, Any]:
     """Remove a player from the roster by name."""
     return remove_player_from_roster(session_id, player_name)
+
+
+@app.patch("/roster/{session_id}/budget")
+def api_update_budget(
+    session_id: str,
+    request: UpdateBudgetRequest,
+) -> dict[str, Any]:
+    """Update the budget for the current roster."""
+    return update_roster_budget(session_id, request.budget)
 
 
 # @app.get("/players/replacements")
