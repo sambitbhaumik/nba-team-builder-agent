@@ -36,6 +36,8 @@ Start both the FastAPI backend and Vite frontend with a single command.
 - **Frontend**: [http://localhost:5173](http://localhost:5173)
 - **Backend**: [http://localhost:8000](http://localhost:8000)
 
+> **Note**: An `OPENROUTER_API_KEY` is required in a `.env` file within the `backend/` directory for the AI agent to function.
+
 ---
 
 ## Tech Stack
