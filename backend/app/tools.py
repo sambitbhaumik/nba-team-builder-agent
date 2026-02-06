@@ -110,7 +110,6 @@ def search_roster_players(
     
     # Calculate remaining budget
     total_cost = sum(p.get("dollar_value", 0.0) for p in current_players)
-    remaining_budget = search_budget - total_cost
     
     # Use the count provided by the LLM agent, but default to 20 for candidate selection
     if count <= 0:
@@ -166,7 +165,7 @@ def search_roster_players(
         }
     
     # Optimize roster to find the best players that fit remaining budget
-    optimized_roster, _ = optimize_roster(valued_players, remaining_budget, count)
+    optimized_roster, _ = optimize_roster(valued_players, search_budget, count)
     
     # Extract player details
     players_data = [
