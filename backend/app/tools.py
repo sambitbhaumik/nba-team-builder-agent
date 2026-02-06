@@ -216,26 +216,6 @@ def tool_generate_report(roster: List[PlayerValue]) -> str:
         return generate_csv_report(report_rows, report_name)
     return ""
 
-
-# def serialize_roster(roster: List[PlayerValue]) -> str:
-#     return json.dumps(
-#         [
-#             {
-#                 "player_id": player.player_id,
-#                 "name": player.name,
-#                 "team": player.team,
-#                 "position": player.position,
-#                 "stats": player.stats,
-#                 "fpg": player.fpg,
-#                 "dollar_value": player.dollar_value,
-#                 "score": player.score,
-#                 "starter": player.starter,
-#             }
-#             for player in roster
-#         ]
-#     )
-
-
 def get_current_roster(session_id: str) -> Dict[str, Any]:
     """Get the current roster state for a session."""
     return get_session_roster(session_id)

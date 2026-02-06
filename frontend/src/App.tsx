@@ -756,7 +756,7 @@ export default function App() {
         style={{ width: rightPanelVisible ? `${leftWidth}%` : "100%" }}
       >
         <header className="flex items-center justify-between border-b border-border px-5 py-4">
-          <h1 className="text-lg font-semibold tracking-tight">Sport Agent</h1>
+          <h1 className="text-lg font-semibold tracking-tight">NBA Fantasy Team Builder</h1>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"

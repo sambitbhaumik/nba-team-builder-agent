@@ -3,7 +3,7 @@ What we need to do.md
 nba/*
 backend/.venv/
 backend/__pycache__/
-backend/data/
+backend/data/app.db
 backend/reports/
 backend/app/__pycache__/
 .vscode/launch.json

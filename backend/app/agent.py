@@ -327,7 +327,7 @@ def _summarize_reasoning(reasoning_content: str) -> str:
     """Summarize agent reasoning_content into a 1-2 line summary using another model."""
     try:
         response = client.chat.completions.create(
-            model="liquid/lfm-2.2-6b",
+            model="liquid/lfm-2.5-1.2b-instruct:free",
             messages=[
                 {"role": "system", "content": "Summarize the following agent reasoning into a concise 1-2 line summary. Focus on the core intent and next steps."},
                 {"role": "user", "content": reasoning_content}
@@ -595,7 +595,7 @@ class ReActAgent:
             status = "APPROVED" if approved else "REJECTED"
             
             # Fetch the last 5 messages if it's an approval response to avoid context bloat
-            messages.extend(get_session_messages(self.session_id, limit=5))
+            messages.extend(get_session_messages(self.session_id, limit=4))
             # Update status in DB
             update_approval_status(approval_id, "approved" if approved else "rejected")
             

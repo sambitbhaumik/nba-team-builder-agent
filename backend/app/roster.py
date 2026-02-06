@@ -66,6 +66,7 @@ def score_player(stats: Dict[str, float]) -> float:
         elif age >= 30:
             score *= 0.98  # Slight decline risk
     
+    # Alternative determeninistic knowledge-based scoring
     # if "3pt" in preferences:
     #     score += stats.get("fg3m", 0) * 1.5
     #     # Bonus for 3PT shooting efficiency
