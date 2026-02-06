@@ -49,11 +49,10 @@ class AgentExecuteResponse(BaseModel):
 class KnowledgeAddRequest(BaseModel):
     key: str
     value: str
-    tags: Optional[str] = None
 
 
 class KnowledgeQueryResponse(BaseModel):
-    items: List[Dict[str, Any]]
+    items: List[Dict[str, str]]
 
 
 class TeamSaveRequest(BaseModel):
@@ -78,6 +77,15 @@ class RosterPlayer(BaseModel):
     dollar_value: float
     score: float
     starter: bool = False
+    pts: Optional[float] = 0.0
+    reb: Optional[float] = 0.0
+    ast: Optional[float] = 0.0
+    stl: Optional[float] = 0.0
+    blk: Optional[float] = 0.0
+    tov: Optional[float] = 0.0
+    fg_pct: Optional[float] = 0.0
+    fg3_pct: Optional[float] = 0.0
+    age: Optional[int] = 0
 
 
 class CurrentRoster(BaseModel):
@@ -103,7 +111,7 @@ class AgentToolResult(BaseModel):
 
 
 class AddPlayerRequest(BaseModel):
-    player_id: int
+    player_ids: List[int]
     budget: Optional[float] = 200.0
 
 

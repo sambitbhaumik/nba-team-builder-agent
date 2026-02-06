@@ -7,8 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .db import clear_session_roster, get_session_roster, update_session_roster
-from .knowledge import load_preferences
+from .db import get_session_roster, update_session_roster
 from .nba import PlayerProfile, fetch_active_players, fetch_player_season_per_game
 from .report import generate_csv_report
 from .roster import PlayerValue, dollar_value, fantasy_points_per_game, optimize_roster, score_player
@@ -97,7 +96,7 @@ def search_roster_players(
     session_id: str,
     search_budget: float = 200.0,
     budget: float = 200.0,
-    count: int = 1,
+    count: int = 20,
 ) -> Dict[str, Any]:
     """
     Search for players suitable for the roster.
@@ -113,7 +112,7 @@ def search_roster_players(
     total_cost = sum(p.get("dollar_value", 0.0) for p in current_players)
     remaining_budget = search_budget - total_cost
     
-    # Use the count provided by the LLM agent
+    # Use the count provided by the LLM agent, but default to 20 for candidate selection
     if count <= 0:
         return {
             "success": False,
@@ -130,9 +129,6 @@ def search_roster_players(
             "player_ids": [],
         }
     
-    # Load user preferences
-    preferences = load_preferences()
-    
     # Calculate values for all players (excluding those already in roster)
     valued_players: List[PlayerValue] = []
     for player in players:
@@ -146,7 +142,7 @@ def search_roster_players(
         
         fpg = fantasy_points_per_game(stats)
         value = dollar_value(fpg, budget=budget)
-        score = score_player(stats, preferences)
+        score = score_player(stats)
         
         valued_players.append(
             PlayerValue(
@@ -172,13 +168,33 @@ def search_roster_players(
     # Optimize roster to find the best players that fit remaining budget
     optimized_roster, _ = optimize_roster(valued_players, remaining_budget, count)
     
-    # Extract player IDs
-    player_ids = [p.player_id for p in optimized_roster]
+    # Extract player details
+    players_data = [
+        {
+            "player_id": p.player_id,
+            "name": p.name,
+            "team": p.team,
+            "position": p.position,
+            "fpg": round(p.fpg, 2),
+            "dollar_value": round(p.dollar_value, 2),
+            "score": round(p.score, 2),
+            "pts": round(p.stats.get("pts", 0.0), 2),
+            "reb": round(p.stats.get("reb", 0.0), 2),
+            "ast": round(p.stats.get("ast", 0.0), 2),
+            "stl": round(p.stats.get("stl", 0.0), 2),
+            "blk": round(p.stats.get("blk", 0.0), 2),
+            "tov": round(p.stats.get("tov", 0.0), 2),
+            "fg_pct": round(p.stats.get("fg_pct", 0.0), 2),
+            "fg3_pct": round(p.stats.get("fg3_pct", 0.0), 2),
+            "age": p.stats.get("age", 0),
+        }
+        for p in optimized_roster
+    ]
     
     return {
         "success": True,
-        "player_ids": player_ids,
-        "count": len(player_ids),
+        "players": players_data,
+        "count": len(players_data),
     }
 
 
@@ -202,23 +218,23 @@ def tool_generate_report(roster: List[PlayerValue]) -> str:
     return ""
 
 
-def serialize_roster(roster: List[PlayerValue]) -> str:
-    return json.dumps(
-        [
-            {
-                "player_id": player.player_id,
-                "name": player.name,
-                "team": player.team,
-                "position": player.position,
-                "stats": player.stats,
-                "fpg": player.fpg,
-                "dollar_value": player.dollar_value,
-                "score": player.score,
-                "starter": player.starter,
-            }
-            for player in roster
-        ]
-    )
+# def serialize_roster(roster: List[PlayerValue]) -> str:
+#     return json.dumps(
+#         [
+#             {
+#                 "player_id": player.player_id,
+#                 "name": player.name,
+#                 "team": player.team,
+#                 "position": player.position,
+#                 "stats": player.stats,
+#                 "fpg": player.fpg,
+#                 "dollar_value": player.dollar_value,
+#                 "score": player.score,
+#                 "starter": player.starter,
+#             }
+#             for player in roster
+#         ]
+#     )
 
 
 def get_current_roster(session_id: str) -> Dict[str, Any]:
@@ -228,61 +244,89 @@ def get_current_roster(session_id: str) -> Dict[str, Any]:
 
 def add_player_to_roster(
     session_id: str,
-    player_id: int,
+    player_ids: List[int],
     budget: float = 200.0,
-    slots: int = 12,
+    slots: int = 8,
 ) -> Dict[str, Any]:
-    """Add a player to the roster. Returns updated roster state."""
+    """Add multiple players to the roster. Returns updated roster state."""
     roster_data = get_session_roster(session_id)
     current_players = roster_data["players"]
     
-    # Check if player already exists
-    if any(p.get("player_id") == player_id for p in current_players):
-        return {"success": False, "error": "Player already in roster", "roster": roster_data}
+    added_players = []
+    errors = []
     
-    # Check if roster is full
-    if len(current_players) >= slots:
-        return {"success": False, "error": "Roster is full", "roster": roster_data}
-    
-    # Fetch player data from cache
+    # Fetch cached player stats once
     players, stats_by_id = tool_get_cached_player_stats()
-    player_profile = next((p for p in players if p.player_id == player_id), None)
-    if not player_profile:
-        return {"success": False, "error": "Player not found", "roster": roster_data}
     
-    stats = stats_by_id.get(str(player_id)) or {}
-    if not stats:
-        return {"success": False, "error": "Player stats not available", "roster": roster_data}
+    for player_id in player_ids:
+        # Check if player already exists
+        if any(p.get("player_id") == player_id for p in current_players):
+            errors.append(f"Player ID {player_id} already in roster")
+            continue
+        
+        # Check if roster is full
+        if len(current_players) >= slots:
+            errors.append(f"Roster is full, could not add player ID {player_id}")
+            break
+        
+        # Find player data
+        player_profile = next((p for p in players if p.player_id == player_id), None)
+        if not player_profile:
+            errors.append(f"Player ID {player_id} not found")
+            continue
+        
+        stats = stats_by_id.get(str(player_id)) or {}
+        if not stats:
+            errors.append(f"Stats for player {player_profile.full_name} not available")
+            continue
+        
+        # Calculate values
+        fpg = fantasy_points_per_game(stats)
+        value = dollar_value(fpg, budget=budget)
+        score = score_player(stats)
+        
+        # Check budget
+        total_cost = sum(p.get("dollar_value", 0.0) for p in current_players)
+        if total_cost + value > budget:
+            errors.append(f"Adding {player_profile.full_name} would exceed budget")
+            continue
+        
+        # Add player
+        new_player = {
+            "player_id": player_id,
+            "name": player_profile.full_name,
+            "team": player_profile.team or "",
+            "position": player_profile.position or "",
+            "fpg": round(fpg, 2),
+            "dollar_value": round(value, 2),
+            "score": round(score, 2),
+            "starter": len(current_players) < 5,
+            "pts": round(stats.get("pts", 0.0), 2),
+            "reb": round(stats.get("reb", 0.0), 2),
+            "ast": round(stats.get("ast", 0.0), 2),
+            "stl": round(stats.get("stl", 0.0), 2),
+            "blk": round(stats.get("blk", 0.0), 2),
+            "tov": round(stats.get("tov", 0.0), 2),
+            "fg_pct": round(stats.get("fg_pct", 0.0), 2),
+            "fg3_pct": round(stats.get("fg3_pct", 0.0), 2),
+            "age": stats.get("age", 0),
+        }
+        current_players.append(new_player)
+        added_players.append(player_profile.full_name)
     
-    # Calculate values
-    preferences = load_preferences()
-    fpg = fantasy_points_per_game(stats)
-    value = dollar_value(fpg, budget=budget)
-    score = score_player(stats, preferences)
+    if added_players:
+        update_session_roster(session_id, current_players, budget)
     
-    # Check budget
-    total_cost = sum(p.get("dollar_value", 0.0) for p in current_players)
-    if total_cost + value > budget:
-        return {"success": False, "error": "Exceeds budget", "roster": roster_data}
-    
-    # Add player
-    new_player = {
-        "player_id": player_id,
-        "name": player_profile.full_name,
-        "team": player_profile.team or "",
-        "position": player_profile.position or "",
-        "fpg": fpg,
-        "dollar_value": value,
-        "score": score,
-        "starter": len(current_players) < 5,
-    }
-    current_players.append(new_player)
-    update_session_roster(session_id, current_players, budget)
+    message = ""
+    if added_players:
+        message = f"Added {', '.join(added_players)} to roster. "
+    if errors:
+        message += f"Errors: {'; '.join(errors)}"
     
     return {
         "success": True,
-        "message": f"Added {player_profile.full_name} to roster",
-        #"roster": get_session_roster(session_id),
+        "message": message.strip(),
+        "added_count": len(added_players),
     }
 
 
@@ -337,10 +381,9 @@ def get_player_details(player_name: str, budget: float = 200.0) -> Dict[str, Any
     if not stats:
         return {"success": False, "error": "Player stats not available"}
     
-    preferences = load_preferences()
     fpg = fantasy_points_per_game(stats)
     value = dollar_value(fpg, budget=budget)
-    score = score_player(stats, preferences)
+    score = score_player(stats)
     
     return {
         "success": True,
@@ -354,56 +397,3 @@ def get_player_details(player_name: str, budget: float = 200.0) -> Dict[str, Any
         "score": round(score, 2),
         "starter": False,
     }
-
-
-# def find_replacements(
-#     position: Optional[str] = None,
-#     exclude_player_ids: Optional[List[int]] = None,
-#     budget: float = 200.0,
-#     max_cost: Optional[float] = None,
-#     limit: int = 10,
-# ) -> List[Dict[str, Any]]:
-    """Find replacement players, optionally for a specific position."""
-    players, stats_by_id = tool_get_cached_player_stats()
-    preferences = load_preferences()
-    exclude_ids = set(exclude_player_ids or [])
-    
-    results = []
-    for player in players:
-        # Skip excluded players
-        if player.player_id in exclude_ids:
-            continue
-        
-        stats = stats_by_id.get(str(player.player_id)) or {}
-        if not stats:
-            continue
-        
-        # Apply position filter
-        if position and position.lower() != (player.position or "").lower():
-            continue
-        
-        fpg = fantasy_points_per_game(stats)
-        value = dollar_value(fpg, budget=budget)
-        
-        # Apply max_cost filter
-        if max_cost and value > max_cost:
-            continue
-        
-        score = score_player(stats, preferences)
-        results.append({
-            "player_id": player.player_id,
-            "name": player.full_name,
-            "team": player.team or "",
-            "position": player.position or "",
-            "fpg": fpg,
-            "dollar_value": value,
-            "score": score,
-            "starter": False,
-        })
-        
-        if len(results) >= limit:
-            break
-    
-    # Sort by score
-    results.sort(key=lambda x: x["score"], reverse=True)
-    return results

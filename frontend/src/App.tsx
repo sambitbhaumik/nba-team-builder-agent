@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { jsPDF } from "jspdf";
 import {
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   Download,
   GripVertical,
@@ -82,23 +81,6 @@ type Message = {
   knowledgeHint?: string;
 };
 
-let initialPlayers: Player[] = [
-  { id: "p1", name: "Stephen Curry", position: "PG", team: "GSW", fpg: 45.7, value: 30.5, tags: ["3PT", "OFFENSE"], steals: 1.1, threes: 4.8, rebounds: 4.4 },
-  { id: "p2", name: "Damian Lillard", position: "PG", team: "MIL", fpg: 41.3, value: 27.6, tags: ["3PT", "CLUTCH"], steals: 1.0, threes: 4.2, rebounds: 4.3 },
-  { id: "p3", name: "Jrue Holiday", position: "PG", team: "BOS", fpg: 32.4, value: 21.6, tags: ["DEFENSE"], steals: 1.4, threes: 2.1, rebounds: 4.6 },
-  { id: "p4", name: "Mikal Bridges", position: "SF", team: "BKN", fpg: 34.2, value: 22.8, tags: ["DEFENSE", "IRONMAN"], steals: 1.2, threes: 2.3, rebounds: 4.8 },
-  { id: "p5", name: "Anthony Davis", position: "PF", team: "LAL", fpg: 44.0, value: 29.3, tags: ["DEFENSE", "RIM"], steals: 1.3, threes: 0.2, rebounds: 12.2 },
-  { id: "p6", name: "Jaren Jackson Jr.", position: "PF", team: "MEM", fpg: 36.4, value: 24.3, tags: ["DEFENSE", "BLOCKS"], steals: 1.0, threes: 1.6, rebounds: 6.8 },
-  { id: "p7", name: "Bam Adebayo", position: "C", team: "MIA", fpg: 37.8, value: 25.2, tags: ["DEFENSE", "PLAYMAKER"], steals: 1.1, threes: 0.2, rebounds: 9.5 },
-  { id: "p8", name: "Klay Thompson", position: "SG", team: "DAL", fpg: 29.1, value: 19.4, tags: ["3PT"], steals: 0.8, threes: 3.9, rebounds: 3.5 },
-  { id: "p9", name: "Anunoby", position: "SF", team: "NYK", fpg: 30.5, value: 20.3, tags: ["DEFENSE"], steals: 1.6, threes: 2.4, rebounds: 4.7 },
-  { id: "p10", name: "Brook Lopez", position: "C", team: "MIL", fpg: 28.0, value: 18.7, tags: ["DEFENSE", "BLOCKS"], steals: 0.6, threes: 1.5, rebounds: 6.4 },
-  { id: "p11", name: "Desmond Bane", position: "SG", team: "MEM", fpg: 33.0, value: 22.0, tags: ["3PT"], steals: 0.9, threes: 3.1, rebounds: 4.5 },
-  { id: "p12", name: "Alex Caruso", position: "SG", team: "CHI", fpg: 24.5, value: 16.3, tags: ["DEFENSE"], steals: 1.7, threes: 1.4, rebounds: 3.3 },
-  { id: "p13", name: "Derrick White", position: "SG", team: "BOS", fpg: 31.6, value: 21.1, tags: ["DEFENSE", "3PT"], steals: 1.0, threes: 2.7, rebounds: 4.2 },
-  { id: "p14", name: "Donovan Mitchell", position: "SG", team: "CLE", fpg: 39.5, value: 26.3, tags: ["3PT", "OFFENSE"], steals: 1.5, threes: 3.2, rebounds: 4.4 },
-  { id: "p15", name: "Draymond Green", position: "PF", team: "GSW", fpg: 29.9, value: 19.9, tags: ["DEFENSE"], steals: 1.2, threes: 1.0, rebounds: 7.5 },
-];
 
 const rosterTemplate: RosterSlot[] = [
   { id: "s1", label: "PG", group: "starter" },
@@ -109,10 +91,6 @@ const rosterTemplate: RosterSlot[] = [
   { id: "b1", label: "Bench 1", group: "bench" },
   { id: "b2", label: "Bench 2", group: "bench" },
   { id: "b3", label: "Bench 3", group: "bench" },
-  { id: "b4", label: "Bench 4", group: "bench" },
-  { id: "b5", label: "Bench 5", group: "bench" },
-  { id: "b6", label: "Bench 6", group: "bench" },
-  { id: "b7", label: "Bench 7", group: "bench" },
 ];
 
 export default function App() {
@@ -128,7 +106,7 @@ export default function App() {
   const [roster, setRoster] = useState<RosterSlot[]>(rosterTemplate);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [players, setPlayers] = useState<Player[]>(initialPlayers);
+  const [players, setPlayers] = useState<Player[]>([]);
   const [placingSlots, setPlacingSlots] = useState<string[]>([]);
   const [savedTeams, setSavedTeams] = useState<SavedTeam[]>([
     { id: "team-1", name: "Defensive Anchors", createdAt: "2026-01-28 18:21", budgetUsed: 142.5, roster: rosterTemplate },
@@ -157,18 +135,10 @@ export default function App() {
   const budgetUsed = rosterPlayers.reduce((sum, p) => sum + p.value, 0);
   const budgetTotal = 200;
   const budgetRatio = Math.min(budgetUsed / budgetTotal, 1);
-  const hasRoster = rosterPlayers.length > 0;
 
   const toggleTrace = (id: string) =>
     setExpandedTraces((prev) => ({ ...prev, [id]: !prev[id] }));
 
-  const autoFillRoster = () => {
-    const recommended = [...players].sort((a, b) => b.fpg - a.fpg).slice(0, 12);
-    const updated = roster.map((slot, i) => ({ ...slot, playerId: recommended[i]?.id }));
-    setRoster(updated);
-    setPlacingSlots(updated.map((s) => s.id));
-    setTimeout(() => setPlacingSlots([]), 800);
-  };
 
   const handleDrop = (slotId: string, playerId: string, fromSlotId?: string) => {
     setRoster((prev) => {
@@ -364,7 +334,17 @@ export default function App() {
                 }
                 
                 // Final content update if provided
-                if (result.message && result.message !== fullContent) {
+                if (result.message) {
+                  const knowledgeMatch = result.message.match(/<knowledge_reasoning>([\s\S]*?)<\/knowledge_reasoning>/);
+                  const knowledgeContent = knowledgeMatch ? knowledgeMatch[1].trim() : "";
+                  // Only set knowledgeHint if there's actual content in the tag
+                  const knowledgeHint = knowledgeContent 
+                    ? knowledgeContent 
+                    : (knowledgeMatch ? undefined : (result.knowledge_used?.length > 0 
+                        ? `Used preferences: ${result.knowledge_used.join(", ")}`
+                        : undefined));
+                  const cleanContent = result.message.replace(/<knowledge_reasoning>[\s\S]*?<\/knowledge_reasoning>/, "").trim();
+
                   setMessages((prev) => {
                     const otherMsgs = prev.filter((m) => m.id !== assistantMsgId);
                     return [
@@ -372,11 +352,9 @@ export default function App() {
                       {
                         id: assistantMsgId,
                         role: "assistant",
-                        content: result.message,
+                        content: cleanContent || result.message,
                         trace: [...trace],
-                        knowledgeHint: result.knowledge_used?.length > 0 
-                          ? `Used preferences: ${result.knowledge_used.join(", ")}`
-                          : undefined,
+                        knowledgeHint: knowledgeHint,
                       },
                     ];
                   });
@@ -796,10 +774,6 @@ export default function App() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="secondary" size="sm" onClick={autoFillRoster}>
-                <WandSparkles className="mr-1 h-3.5 w-3.5" />
-                Auto-fill
-              </Button>
               <Dialog>
                 <DialogTrigger asChild>
                   <Button size="sm">Save</Button>
@@ -916,7 +890,7 @@ export default function App() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm">Bench</CardTitle>
               </CardHeader>
-              <CardContent className="grid grid-cols-4 gap-2">
+              <CardContent className="grid grid-cols-3 gap-2">
                 {roster
                   .filter((s) => s.group === "bench")
                   .map((slot) => {

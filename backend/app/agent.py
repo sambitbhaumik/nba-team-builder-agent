@@ -13,12 +13,8 @@ from openai import OpenAI
 
 from .db import (
     append_session_message,
-    get_session_messages,
-    get_session_roster,
     save_session_messages,
-    update_session_roster,
 )
-from .knowledge import load_preferences
 
 # Configure logging
 class ColorFormatter(logging.Formatter):
@@ -81,6 +77,18 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "fetch_user_preferences",
+            "description": "Fetch all stored user preferences from the database. Use this to understand user tastes and apply them when selecting players.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_current_roster",
             "description": "Get the current roster state including players currently in the roster, budget allotted for the roster, and total cost already spent.",
             "parameters": {
@@ -98,10 +106,6 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    # "session_id": {
-                    #     "type": "string",
-                    #     "description": "The session ID",
-                    # },
                     "search_budget": {
                         "type": "number",
                         "description": "Total budget allotted for the search (float). May be less than the total budget of the roster if some slots are already filled. (default 200.0)",
@@ -115,7 +119,7 @@ TOOLS = [
                         "description": "Number of players to find (default 1).",
                     },
                 },
-                "required": [],
+                "required": ["count"],
             },
         },
     },
@@ -144,24 +148,23 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "add_player_to_roster",
-            "description": "Add a player to the roster. Validates budget, and prevents duplicates.",
+            "description": "Add one or more players to the roster. Validates budget, and prevents duplicates.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    # "session_id": {
-                    #     "type": "string",
-                    #     "description": "The session ID",
-                    # },
-                    "player_id": {
-                        "type": "integer",
-                        "description": "The player ID to add",
+                    "player_ids": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        },
+                        "description": "List of player IDs to add",
                     },
                     "budget": {
                         "type": "number",
                         "description": "Total budget allotted for the roster (float). Used for calculating budget-adjusted dollar value of the player (default 200.0)",
                     },
                 },
-                "required": ["player_id"],
+                "required": ["player_ids"],
             },
         },
     },
@@ -173,10 +176,6 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    # "session_id": {
-                    #     "type": "string",
-                    #     "description": "The session ID",
-                    # },
                     "player_name": {
                         "type": "string",
                         "description": "The full name of the player to remove",
@@ -203,96 +202,77 @@ TOOLS = [
             },
         },
     },
-    # {
-    #     "type": "function",
-    #     "function": {
-    #         "name": "find_replacements",
-    #         "description": "Find replacement players for a specific position, optionally excluding certain players and filtering by cost.",
-    #         "parameters": {
-    #             "type": "object",
-    #             "properties": {
-    #                 "position": {
-    #                     "type": "string",
-    #                     "description": "Position to find replacements for (PG, SG, SF, PF, C)",
-    #                 },
-    #                 "exclude_player_ids": {
-    #                     "type": "array",
-    #                     "items": {"type": "integer"},
-    #                     "description": "List of player IDs to exclude from results",
-    #                 },
-    #                 "budget": {
-    #                     "type": "number",
-    #                     "description": "Total budget for calculating dollar values (default 200)",
-    #                 },
-    #                 "max_cost": {
-    #                     "type": "number",
-    #                     "description": "Maximum dollar value/cost for replacements",
-    #                 },
-    #                 "limit": {
-    #                     "type": "integer",
-    #                     "description": "Maximum number of results (default 10)",
-    #                 },
-    #             },
-    #             "required": [],
-    #         },
-    #     },
-    # },
-    # {
-    #     "type": "function",
-    #     "function": {
-    #         "name": "tool_get_cached_player_stats",
-    #         "description": "Get cached player stats from the stored player data. This is faster than fetching from the API and should be used for regular operations. Returns a list of active players and their season statistics.",
-    #         "parameters": {
-    #             "type": "object",
-    #             "properties": {},
-    #             "required": [],
-    #         },
-    #     },
-    # },
-    # {
-    #     "type": "function",
-    #     "function": {
-    #         "name": "tool_fetch_player_stats",
-    #         "description": "Fetch player stats from NBA API and refresh the cache. This is slow and should only be used to refresh the player pool. For regular operations, use tool_get_cached_player_stats instead.",
-    #         "parameters": {
-    #             "type": "object",
-    #             "properties": {},
-    #             "required": [],
-    #         },
-    #     },
-    # },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_user_preference",
+            "description": "Save a user preference to the database. Preferences can be anything related to the user's sports interests, like preferred teams, player attributes they value (e.g., 'high 3pt', 'good rebounders'), etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "The type of preference (e.g., 'preferred_team', 'player_attribute')",
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "The specific preference value (e.g., 'Lakers', 'high 3pt')",
+                    },
+                },
+                "required": ["key", "value"],
+            },
+        },
+    },
 ]
 
 # System prompt for ReAct agent
-SYSTEM_PROMPT = """You are an intelligent, helpful assistant that builds fantasy NBA rosters of 12 players using the ReAct (Reasoning and Acting) pattern.
-
+SYSTEM_PROMPT = """You are an intelligent, helpful assistant that builds fantasy NBA rosters of 8 players using the ReAct (Reasoning and Acting) pattern.
 WORKFLOW (ReAct Pattern):
 1. **Thought**: State what you'll do next in 1-2 brief sentences
 2. **Action**: Call the appropriate tool
 3. **Observation**: Note the result in 1-2 sentences, then proceed
 
 ROSTER BUILDING PROTOCOL:
-Step 1: Call get_current_roster to check available slots
-Step 2: Call search_roster_players with count=[number of slots to be filled] to get player IDs that fit search budget. If user requests roster without specifying count, fill all remaining slots
-Step 3: Call add_player_to_roster for each player ID sequentially.
-Step 4: Confirm completion
+When we need to build a roster, these are the usual steps:
+Step 1: Call get_current_roster to check available slots.
+Step 2: Call fetch_user_preferences to understand user tastes.
+Step 3: Determine which players to add based on preferences:
+   
+   IF no stored user preferences exist:
+   - Call search_roster_players with count=[number of slots to be filled]
+   - If user does not specify a count, fill all remaining slots in the roster
+   - Proceed directly to Step 4 with all returned players
+   
+   IF stored user preferences exist:
+   a) Call search_roster_players with count=10 to get an initial list
+   b) Use your judgment to select the best players from this list based on user preferences
+   c) If unsatisfied with the options, call search_roster_players ONE more time with count=10
+   d) If still no suitable players match user preferences, fall back to the "no preferences" approach above
+
+Step 4: IMPORTANT: For EACH player you've decided to add:
+   - You must call add_player_to_roster with that player's ID
+   - Do this for every single player being added to the roster
+   - Do NOT assume players are added automatically
+
+Step 5: Confirm completion to the user.
+
+KNOWLEDGE & PREFERENCES:
+- If the user mentions a basketball related preferences (e.g., "I like the Lakers", "I want more 3pt shooters", "Focus on rebounders"), call save_user_preference to store it.
+- Store them with simple key-value pairs. Example: "preferred_team": "Lakers", "player_attribute": "high 3pt". Consider storing only stats, team and player related preferences.
+- IMPORTANT: If you chose players based on user preferences, in your final response, you MUST include a 1-2 line summary of which players you chose based on which preferences. Wrap this knowledge-based reasoning in a <knowledge_reasoning> tag.
+  Example: <knowledge_reasoning>I chose Stephen Curry and Klay Thompson because you preferred high 3pt shooters.</knowledge_reasoning>
 
 NOTES:
+- If a new budget has been provided, always set that first with update_roster_budget before proceeding with the next step.
 - If user asks to add a player by name, fetch their id by calling get_player_details first.
-- If user asks to remove a player, fetch their information by calling get_current_roster first.
+- If user asks to remove a player, verify player is in the roster by calling get_current_roster first.
 - If players have been added or removed, always tell the user who were added or removed.
+- Never choose more than 3 players based on user preferences. We do this to keep the roster balanced.
+- If you have to add players and the roster is full, then remove the worst players from the roster to make space for the new players. For example, when we have to improve roster with user preferences.
 
 REASONING DEPTH CONTROL:
-- Use minimal reasoning for routine operations (checking roster, adding players)
-- Never reason about what to say to the user
-- Stop reasoning immediately after deciding on an action
-- IMPORTANT: Keep all reasoning under 3 sentences. Never more than 3 sentences.
-
-EFFICIENCY RULES:
-- No meta-commentary about "what we should tell the user"
-- No reasoning loops or self-dialogue
-
-Note: Player data is cached and periodically updated."""
+- Use minimal reasoning for routine operations (checking roster, loading preferences)
+- Never reason about what to say to the user"""
 
 
 def _summarize_reasoning(reasoning_content: str) -> str:
@@ -356,20 +336,15 @@ class ReActAgent:
 
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
         """Execute a tool function by calling API endpoints."""
-        # Get current roster to extract budget and slots if needed
-        # roster_response = self._call_api("GET", f"/roster/{self.session_id}")
-        # budget = roster_response.get("budget", 200.0) if isinstance(roster_response, dict) else 200.0
-        # slots = roster_response.get("slots", 12) if isinstance(roster_response, dict) else 12
-
         try:
             if tool_name == "get_current_roster":
                 result = self._call_api("GET", f"/roster/{self.session_id}")
                 # Convert CurrentRoster format to expected dict format
                 if isinstance(result, dict) and "players" in result:
-                    csv_lines = ["players:", "pid,name,team,pos,fpg,val,score"]
+                    csv_lines = ["players found:", "player_id,name,team,fpg,val,pts,reb,ast,stl,blk,tov,fg_pct,fg3_pct,age"]
                     for p in result.get("players", []):
                         csv_lines.append(
-                            f"{p.get('player_id', 0)},{p.get('name', '')},{p.get('team', '')},{p.get('position', 'none')},{p.get('fpg', 0.0)},{p.get('dollar_value', 0.0)},{p.get('score', 0.0)}"
+                            f"{p.get('player_id', 0)},{p.get('name', '')},{p.get('team', '')},{p.get('fpg', 0.0)},{p.get('dollar_value', 0.0)},{p.get('pts', 0.0)},{p.get('reb', 0.0)},{p.get('ast', 0.0)},{p.get('stl', 0.0)},{p.get('blk', 0.0)},{p.get('tov', 0.0)},{p.get('fg_pct', 0.0)},{p.get('fg3_pct', 0.0)},{p.get('age', 0)}"
                         )
                     
                     total_cost = result.get("total_cost", 0.0)
@@ -380,6 +355,49 @@ class ReActAgent:
                     "Tool: get_current_roster",
                     "success",
                     f"Retrieved current roster",
+                )
+                return result
+
+            elif tool_name == "fetch_user_preferences":
+                result = self._call_api("GET", "/knowledge/preferences")
+                if isinstance(result, dict) and "items" in result:
+                    items = result.get("items", [])
+                    preference_count = len(items)
+                    
+                    if preference_count > 0:
+                        preference_lines = ["user preferences:"]
+                        for item in items:
+                            key = item.get("key", "")
+                            value = item.get("value", "")
+                            preference_lines.append(f"{key}: {value}")
+                        result = "\n".join(preference_lines)
+                    else:
+                        result = "No user preferences stored."
+                    
+                    self._add_activity(
+                        "Tool: fetch_user_preferences",
+                        "success",
+                        f"Retrieved {preference_count} user preferences",
+                    )
+                else:
+                    self._add_activity(
+                        "Tool: fetch_user_preferences",
+                        "error",
+                        result.get("error", "Unknown error"),
+                    )
+                    result = {"error": result.get("error", "Unknown error")}
+                return result
+
+            elif tool_name == "save_user_preference":
+                json_data = {
+                    "key": arguments["key"],
+                    "value": arguments["value"],
+                }
+                result = self._call_api("POST", "/knowledge/add", json_data=json_data)
+                self._add_activity(
+                    "Tool: save_user_preference",
+                    "success" if result.get("status") == "saved" else "error",
+                    result.get("error", "Preference saved successfully" if result.get("status") == "saved" else "Unknown error"),
                 )
                 return result
 
@@ -394,7 +412,17 @@ class ReActAgent:
                 params = {k: v for k, v in params.items() if v is not None}
                 result = self._call_api("GET", "/players/search-roster", params=params)
                 if isinstance(result, dict) and result.get("success"):
-                    player_count = len(result.get("player_ids", []))
+                    players = result.get("players", [])
+                    player_count = len(players)
+                    
+                    csv_lines = ["players found:", "player_id,name,team,fpg,val,pts,reb,ast,stl,blk,tov,fg_pct,fg3_pct,age"]
+                    for p in players:
+                        csv_lines.append(
+                            f"{p.get('player_id', 0)},{p.get('name', '')},{p.get('team', '')},{p.get('fpg', 0.0)},{p.get('dollar_value', 0.0)},{p.get('pts', 0.0)},{p.get('reb', 0.0)},{p.get('ast', 0.0)},{p.get('stl', 0.0)},{p.get('blk', 0.0)},{p.get('tov', 0.0)},{p.get('fg_pct', 0.0)},{p.get('fg3_pct', 0.0)},{p.get('age', 0)}"
+                        )
+                    
+                    result = "\n".join(csv_lines)
+                    
                     self._add_activity(
                         "Tool: search_roster_players",
                         "success",
@@ -422,14 +450,14 @@ class ReActAgent:
 
             elif tool_name == "add_player_to_roster":
                 json_data = {
-                    "player_id": arguments["player_id"],
+                    "player_ids": arguments["player_ids"],
                     "budget": arguments.get("budget", 200.0),
                 }
                 result = self._call_api("POST", f"/roster/{self.session_id}/players", json_data=json_data)
                 self._add_activity(
                     "Tool: add_player_to_roster",
                     "success" if result.get("success") else "error",
-                    result.get("error", result.get("message", "Player added successfully")),
+                    result.get("error", result.get("message", "Players added successfully")),
                 )
                 return result
 
@@ -454,68 +482,6 @@ class ReActAgent:
                 )
                 return result
 
-            # elif tool_name == "find_replacements":
-            #     params = {
-            #         "position": arguments.get("position"),
-            #         "budget": arguments.get("budget", budget),
-            #         "max_cost": arguments.get("max_cost"),
-            #         "limit": arguments.get("limit", 10),
-            #     }
-            #     # Handle exclude_player_ids
-            #     exclude_ids = arguments.get("exclude_player_ids")
-            #     if exclude_ids:
-            #         params["exclude_player_ids"] = exclude_ids
-            #     # Remove None values
-            #     params = {k: v for k, v in params.items() if v is not None}
-            #     result = self._call_api("GET", "/players/replacements", params=params)
-            #     if isinstance(result, list):
-            #         self._add_activity(
-            #             "Tool: find_replacements",
-            #             "success",
-            #             f"Found {len(result)} replacement options",
-            #         )
-            #     else:
-            #         self._add_activity(
-            #             "Tool: find_replacements",
-            #             "error",
-            #             result.get("error", "Unknown error"),
-            #         )
-            #     return result
-
-            # elif tool_name == "tool_get_cached_player_stats":
-            #     # Call the API endpoint which will use cached data
-            #     result = self._call_api("POST", "/tools/get-cached-player-stats", json_data={})
-            #     if isinstance(result, dict) and "players" in result:
-            #         self._add_activity(
-            #             "Tool: tool_get_cached_player_stats",
-            #             "success",
-            #             f"Retrieved cached stats for {len(result.get('players', []))} players",
-            #         )
-            #     else:
-            #         self._add_activity(
-            #             "Tool: tool_get_cached_player_stats",
-            #             "error",
-            #             result.get("error", "No cached data available. Please refresh player stats first."),
-            #         )
-            #     return result
-            
-            # elif tool_name == "tool_fetch_player_stats":
-            #     result = self._call_api("POST", "/tools/fetch-player-stats", json_data={})
-            #     if isinstance(result, dict) and "players" in result:
-            #         self._add_activity(
-            #             "Tool: tool_fetch_player_stats",
-            #             "success",
-            #             f"Fetched and cached stats for {len(result.get('players', []))} players",
-            #         )
-            #     else:
-            #         self._add_activity(
-            #             "Tool: tool_fetch_player_stats",
-            #             "error",
-            #             result.get("error", "Unknown error"),
-            #         )
-            #     return result
-
-
             else:
                 error_msg = f"Unknown tool: {tool_name}"
                 self._add_activity(f"Tool: {tool_name}", "error", error_msg)
@@ -534,38 +500,7 @@ class ReActAgent:
         stream_callback: Optional[callable] = None,
     ) -> Dict[str, Any]:
         """Execute the ReAct agent loop."""
-        # Initialize or update roster with budget if provided
-        # if budget is not None:
-        #     roster_response = self._call_api("GET", f"/roster/{self.session_id}")
-        #     if isinstance(roster_response, dict):
-        #         roster_data = {
-        #             "players": [
-        #                 {
-        #                     "player_id": p.get("player_id", 0),
-        #                     "name": p.get("name", ""),
-        #                     "team": p.get("team"),
-        #                     "position": p.get("position"),
-        #                     "fpg": p.get("fpg", 0.0),
-        #                     "dollar_value": p.get("dollar_value", 0.0),
-        #                     "score": p.get("score", 0.0),
-        #                 }
-        #                 for p in roster_response.get("players", [])
-        #             ],
-        #             "budget": roster_response.get("budget", 200.0),
-        #             "slots": roster_response.get("slots", 12),
-        #         }
-        #         update_session_roster(
-        #             self.session_id,
-        #             roster_data.get("players", []),
-        #             budget,
-        #             roster_data.get("slots", 12),
-        #         )
 
-        # Load conversation history
-        #messages = get_session_messages(self.session_id)
-        
-        # Initialize messages if empty
-        #if not messages:
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         save_session_messages(self.session_id, messages)
 
@@ -573,15 +508,12 @@ class ReActAgent:
         messages.append({"role": "user", "content": user_message})
         append_session_message(self.session_id, "user", user_message)
 
-        #self._add_activity("User Input", "success", f"Received: {user_message}")
-
         # ReAct loop
         iteration = 0
         final_response = None
 
         while iteration < self.max_iterations:
             iteration += 1
-            #self._add_activity("Iteration", "info", f"Starting iteration {iteration}")
 
             try:
                 # Call OpenAI API
@@ -599,15 +531,14 @@ class ReActAgent:
                 )
 
                 message = response.choices[0].message
+                # fetch reasoning content from the response
                 reasoning_content = getattr(response.choices[0].message, 'reasoning', None)
                 
-                # Add assistant's reasoning/response to messages
+                # Add assistant's response to messages
                 assistant_content = message.content or ""
                 if assistant_content:
                     messages.append({"role": "assistant", "content": assistant_content})
-                    #self._add_activity("Reasoning", "success", assistant_content)
-                    # if stream_callback:
-                    #     stream_callback({"type": "reasoning", "content": assistant_content})
+                    
                 if reasoning_content:
                     logger.info(f"Reasoning: {reasoning_content}")
                     reasoning_content = _summarize_reasoning(reasoning_content)
@@ -728,36 +659,9 @@ class ReActAgent:
         if final_response:
             append_session_message(self.session_id, "assistant", final_response)
 
-        # Get final roster state
-        # roster_response = self._call_api("GET", f"/roster/{self.session_id}")
-        # final_roster = {
-        #     "players": [
-        #         {
-        #             "player_id": p.get("player_id", 0),
-        #             "name": p.get("name", ""),
-        #             "team": p.get("team"),
-        #             "position": p.get("position"),
-        #             "fpg": p.get("fpg", 0.0),
-        #             "dollar_value": p.get("dollar_value", 0.0),
-        #             "score": p.get("score", 0.0),
-        #         }
-        #         for p in roster_response.get("players", [])
-        #     ],
-        #     "total_cost": roster_response.get("total_cost", 0.0),
-        #     "budget": roster_response.get("budget", 200.0),
-        #     "slots": roster_response.get("slots", 12),
-        #     "slots_remaining": roster_response.get("slots_remaining", 12),
-        # } if isinstance(roster_response, dict) else {"players": [], "total_cost": 0.0, "budget": 200.0, "slots": 12, "slots_remaining": 12}
-        
-        # Load preferences used
-        #preferences = load_preferences()
-
         return {
             "session_id": self.session_id,
             "plan": [activity["step"] for activity in self.activity_log],
             "activity_log": self.activity_log,
-            #"roster": final_roster,
-            #"report_path": report_path,
-            #"knowledge_used": preferences,
             "message": final_response or "Agent execution completed.",
         }

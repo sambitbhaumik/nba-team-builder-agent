@@ -19,21 +19,14 @@ from .schemas import (
     AgentActivity,
     AgentExecuteRequest,
     AgentExecuteResponse,
-    # CalculateValuesRequest,
-    # CalculateValuesResponse,
     CurrentRoster,
     FetchPlayerStatsResponse,
     GenerateReportRequest,
     GenerateReportResponse,
     KnowledgeAddRequest,
     KnowledgeQueryResponse,
-    # OptimizeRosterFromValuesRequest,
-    # OptimizeRosterFromValuesResponse,
-    OptimizeRosterRequest,
     PlayerProfileResponse,
-    # PlayerSearchRequest,
     PlayerStat,
-    PlayerValueResponse,
     RosterPlayer,
     RosterResult,
     TeamListResponse,
@@ -42,7 +35,6 @@ from .schemas import (
 )
 from .tools import (
     add_player_to_roster,
-    #find_replacements,
     get_current_roster,
     get_player_details,
     remove_player_from_roster,
@@ -231,11 +223,11 @@ async def agent_stream(
 
 @app.post("/knowledge/add")
 def knowledge_add(payload: KnowledgeAddRequest) -> dict:
-    store_preference(payload.key, payload.value, payload.tags)
+    store_preference(payload.key, payload.value)
     return {"status": "saved"}
 
 
-@app.get("/knowledge/query", response_model=KnowledgeQueryResponse)
+@app.get("/knowledge/preferences", response_model=KnowledgeQueryResponse)
 def knowledge_query() -> KnowledgeQueryResponse:
     items = query_preferences()
     return KnowledgeQueryResponse(items=items)
@@ -452,6 +444,15 @@ def api_get_current_roster(session_id: str) -> CurrentRoster:
             dollar_value=round(p.get("dollar_value", 0.0), 2),
             score=round(p.get("score", 0.0), 2),
             starter=p.get("starter", False),
+            pts=round(p.get("pts", 0.0), 2),
+            reb=round(p.get("reb", 0.0), 2),
+            ast=round(p.get("ast", 0.0), 2),
+            stl=round(p.get("stl", 0.0), 2),
+            blk=round(p.get("blk", 0.0), 2),
+            tov=round(p.get("tov", 0.0), 2),
+            fg_pct=round(p.get("fg_pct", 0.0), 2),
+            fg3_pct=round(p.get("fg3_pct", 0.0), 2),
+            age=p.get("age", 0),
         )
         for p in roster_data.get("players", [])
     ]
@@ -466,30 +467,17 @@ def api_get_current_roster(session_id: str) -> CurrentRoster:
 @app.get("/players/search-roster")
 def api_search_roster_players(
     session_id: str,
+    search_budget: float = 200.0,
     budget: float = 200.0,
     count: int = 1,
 ) -> dict[str, Any]:
     """Search for players suitable for the roster. Returns a list of player IDs."""
     return search_roster_players(
         session_id=session_id,
+        search_budget=search_budget,
         budget=budget,
         count=count,
     )
-
-
-# @app.get("/players/search")
-# def api_search_players(
-#     name: str,
-#     budget: float = 200.0,
-#     limit: int = 20,
-# ) -> list[dict[str, Any]]:
-#     """Search for players by name (partial match)."""
-#     return search_players(
-#         name=name,
-#         budget=budget,
-#         limit=limit,
-#     )
-
 
 @app.get("/players/{player_name}")
 def api_get_player_details(player_name: str, budget: float = 200.0) -> dict[str, Any]:
@@ -502,10 +490,10 @@ def api_add_player_to_roster(
     session_id: str,
     request: AddPlayerRequest,
 ) -> dict[str, Any]:
-    """Add a player to the roster."""
+    """Add players to the roster."""
     return add_player_to_roster(
         session_id,
-        request.player_id,
+        request.player_ids,
         request.budget or 200.0,
     )
 
@@ -526,95 +514,6 @@ def api_update_budget(
 ) -> dict[str, Any]:
     """Update the budget for the current roster."""
     return update_roster_budget(session_id, request.budget)
-
-
-# @app.get("/players/replacements")
-# def api_find_replacements(
-#     position: str | None = None,
-#     exclude_player_ids: list[int] | None = None,
-#     budget: float = 200.0,
-#     max_cost: float | None = None,
-#     limit: int = 10,
-# ) -> list[dict[str, Any]]:
-#     """Find replacement players for a specific position."""
-#     return find_replacements(
-#         position=position,
-#         exclude_player_ids=exclude_player_ids,
-#         budget=budget,
-#         max_cost=max_cost,
-#         limit=limit,
-#     )
-
-
-# @app.post("/roster/{session_id}/optimize")
-# def api_optimize_roster(
-#     session_id: str,
-#     request: OptimizeRosterRequest | None = None,
-# ) -> dict[str, Any]:
-#     """Optimize the roster using available players via API calls."""
-#     import httpx
-#     
-#     # Get current roster to determine budget/slots if not provided
-#     roster_data = get_current_roster(session_id)
-#     if request is None:
-#         request = OptimizeRosterRequest()
-#     budget = request.budget if request.budget is not None else roster_data.get("budget", 200.0)
-#     slots = request.slots if request.slots is not None else roster_data.get("slots", 12)
-#     
-#     preferences = load_preferences()
-#     
-#     # Call API to calculate values using cached player stats
-#     api_base_url = os.getenv("API_BASE_URL", "http://localhost:8000")
-#     with httpx.Client(timeout=60.0) as client:
-#         # Calculate values (will use cached player stats automatically)
-#         calculate_request = {
-#             "preferences": preferences,
-#             "budget": budget,
-#         }
-#         calculate_response = client.post(
-#             f"{api_base_url}/tools/calculate-values",
-#             json=calculate_request,
-#         )
-#         calculate_response.raise_for_status()
-#         calculate_data = calculate_response.json()
-#         
-#         # Optimize roster
-#         optimize_request = {
-#             "players": calculate_data["valued_players"],
-#             "budget": budget,
-#             "slots": slots,
-#         }
-#         optimize_response = client.post(
-#             f"{api_base_url}/tools/optimize-roster-from-values",
-#             json=optimize_request,
-#         )
-#         optimize_response.raise_for_status()
-#         optimize_data = optimize_response.json()
-#     
-#     # Convert to dict format
-#     optimized_players = [
-#         {
-#             "player_id": p["player_id"],
-#             "name": p["name"],
-#             "team": p["team"],
-#             "position": p["position"],
-#             "stats": p["stats"],
-#             "fpg": p["fpg"],
-#             "dollar_value": p["dollar_value"],
-#             "score": p["score"],
-#         }
-#         for p in optimize_data["optimized_roster"]
-#     ]
-#     
-#     # Update session roster
-#     from .db import update_session_roster
-#     update_session_roster(session_id, optimized_players, budget, slots)
-#     
-#     return {
-#         "success": True,
-#         "roster": get_current_roster(session_id),
-#         "total_cost": optimize_data["total_cost"],
-#     }
 
 
 @app.post("/roster/{session_id}/report")

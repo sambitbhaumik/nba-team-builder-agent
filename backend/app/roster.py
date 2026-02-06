@@ -45,11 +45,11 @@ def fantasy_points_per_game(stats: Dict[str, float]) -> float:
     return base_score + efficiency_bonus
 
 
-def dollar_value(fpg: float, avg_fpg: float = 25.0, budget: float = 200.0, slots: int = 12) -> float:
+def dollar_value(fpg: float, avg_fpg: float = 25.0, budget: float = 200.0, slots: int = 8) -> float:
     return (fpg / avg_fpg) * (budget / slots)
 
 
-def score_player(stats: Dict[str, float], preferences: List[str]) -> float:
+def score_player(stats: Dict[str, float]) -> float:
     """Score a player based on fantasy points, user preferences, and age."""
     score = fantasy_points_per_game(stats)
     
@@ -66,42 +66,42 @@ def score_player(stats: Dict[str, float], preferences: List[str]) -> float:
         elif age >= 30:
             score *= 0.98  # Slight decline risk
     
-    if "3pt" in preferences:
-        score += stats.get("fg3m", 0) * 1.5
-        # Bonus for 3PT shooting efficiency
-        fg3_pct = stats.get("fg3_pct", 0)
-        if fg3_pct > 0.38:
-            score += (fg3_pct - 0.38) * 15
+    # if "3pt" in preferences:
+    #     score += stats.get("fg3m", 0) * 1.5
+    #     # Bonus for 3PT shooting efficiency
+    #     fg3_pct = stats.get("fg3_pct", 0)
+    #     if fg3_pct > 0.38:
+    #         score += (fg3_pct - 0.38) * 15
     
-    if "defense" in preferences:
-        score += stats.get("stl", 0) * 1.8 + stats.get("blk", 0) * 1.8
-        # Defensive rebounds contribute to defense
-        score += stats.get("dreb", 0) * 0.5
+    # if "defense" in preferences:
+    #     score += stats.get("stl", 0) * 1.8 + stats.get("blk", 0) * 1.8
+    #     # Defensive rebounds contribute to defense
+    #     score += stats.get("dreb", 0) * 0.5
     
-    if "rebounding" in preferences:
-        score += stats.get("oreb", 0) * 2.0 + stats.get("dreb", 0) * 1.0
+    # if "rebounding" in preferences:
+    #     score += stats.get("oreb", 0) * 2.0 + stats.get("dreb", 0) * 1.0
     
-    if "efficiency" in preferences:
-        fg_pct = stats.get("fg_pct", 0)
-        ft_pct = stats.get("ft_pct", 0)
-        if fg_pct > 0.50:
-            score += (fg_pct - 0.50) * 20
-        if ft_pct > 0.80:
-            score += (ft_pct - 0.80) * 10
+    # if "efficiency" in preferences:
+    #     fg_pct = stats.get("fg_pct", 0)
+    #     ft_pct = stats.get("ft_pct", 0)
+    #     if fg_pct > 0.50:
+    #         score += (fg_pct - 0.50) * 20
+    #     if ft_pct > 0.80:
+    #         score += (ft_pct - 0.80) * 10
     
-    if "youth" in preferences and age > 0:
-        # Strong preference for younger players
-        if age < 25:
-            score *= 1.15
-        elif age < 28:
-            score *= 1.05
+    # if "youth" in preferences and age > 0:
+    #     # Strong preference for younger players
+    #     if age < 25:
+    #         score *= 1.15
+    #     elif age < 28:
+    #         score *= 1.05
     
-    if "veteran" in preferences and age > 0:
-        # Preference for experienced players
-        if age >= 30:
-            score *= 1.10
-        elif age >= 28:
-            score *= 1.05
+    # if "veteran" in preferences and age > 0:
+    #     # Preference for experienced players
+    #     if age >= 30:
+    #         score *= 1.10
+    #     elif age >= 28:
+    #         score *= 1.05
     
     return score
 

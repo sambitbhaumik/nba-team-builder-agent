@@ -30,11 +30,8 @@ def init_db() -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS user_preferences (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 key TEXT NOT NULL,
-                value TEXT NOT NULL,
-                tags TEXT,
-                updated_at TEXT NOT NULL
+                value TEXT NOT NULL
             )
             """
         )
@@ -118,27 +115,24 @@ def append_session_message(session_id: str, role: str, content: str) -> None:
     save_session_messages(session_id, messages)
 
 
-def add_preference(key: str, value: str, tags: Optional[str] = None) -> None:
-    from datetime import datetime, timezone
-
-    now = datetime.now(timezone.utc).isoformat()
+def add_preference(key: str, value: str) -> None:
     with get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO user_preferences (key, value, tags, updated_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO user_preferences (key, value)
+            VALUES (?, ?)
             """,
-            (key, value, tags, now),
+            (key, value),
         )
         conn.commit()
 
 
-def query_preferences() -> List[Dict[str, Any]]:
+def query_preferences() -> List[Dict[str, str]]:
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT key, value, tags, updated_at FROM user_preferences ORDER BY updated_at DESC"
+            "SELECT key, value FROM user_preferences"
         ).fetchall()
-        return [dict(row) for row in rows]
+        return [dict[str, str](row) for row in rows]
 
 
 def save_team(
@@ -227,7 +221,7 @@ def update_session_roster(
             conn.execute(
                 """
                 INSERT INTO session_rosters (session_id, roster_json, budget, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?)
                 """,
                 (session_id, roster_json, budget, now),
             )
