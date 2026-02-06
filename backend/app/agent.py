@@ -14,6 +14,10 @@ from openai import OpenAI
 from .db import (
     append_session_message,
     save_session_messages,
+    get_session_messages,
+    create_pending_approval,
+    get_latest_pending_approval,
+    update_approval_status,
 )
 
 # Configure logging
@@ -223,6 +227,38 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "request_approval",
+            "description": "Request user approval for a proposed roster change. Use this when you need to replace players to make room for improvements. Provide a clear summary of what you're proposing to do.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action_type": {
+                        "type": "string",
+                        "enum": ["remove_and_replace"],
+                        "description": "Type of action requiring approval",
+                    },
+                    "players_to_remove": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of player names to remove from roster",
+                    },
+                    "players_to_add": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of player names being added to roster",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Explanation of why these changes improve the roster (e.g., 'Removing low-rebound players to add higher-rebound players per your request')",
+                    },
+                },
+                "required": ["action_type", "players_to_remove", "players_to_add", "reason"],
+            },
+        },
+    },
 ]
 
 # System prompt for ReAct agent
@@ -233,46 +269,58 @@ WORKFLOW (ReAct Pattern):
 3. **Observation**: Note the result in 1-2 sentences, then proceed
 
 ROSTER BUILDING PROTOCOL:
-When we need to build a roster, these are the usual steps:
-Step 1: Call get_current_roster to check available slots.
-Step 2: Call fetch_user_preferences to understand user tastes.
-Step 3: Determine which players to add based on preferences:
+Step 1: Call get_current_roster to check roster state.
+Step 2: Call fetch_user_preferences to fetch user's stored preferences.
+Step 3: Analyze the situation:
+   - If roster has empty slots → proceed to fill them
+   - If roster is full and user wants to add players → this is a REPLACEMENT SCENARIO
+Step 4: Determine which players to add based on preferences:
    
    IF no stored user preferences exist:
-   - Call search_roster_players with count=[number of slots to be filled]
-   - If user does not specify a count, fill all remaining slots in the roster
-   - Proceed directly to Step 4 with all returned players
+   a) Call search_roster_players with count=[number of slots to be filled]
+   b) If user does not specify a count, fill all remaining slots in the roster
+   c) Proceed directly to Step 4 with all returned players
    
    IF stored user preferences exist:
-   a) Call search_roster_players with count=10 to get an initial list
-   b) Use your judgment to select the best players from this list based on user preferences
-   c) If unsatisfied with the options, call search_roster_players ONE more time with count=10
-   d) If still no suitable players match user preferences, fall back to the "no preferences" approach above
+   a) Call search_roster_players with count=10
+   b) Use your judgment to select the best 2 players from this list based on user preferences
+   c) If unsatisfied with the options, fall back to the "no preferences" approach above
 
-Step 4: IMPORTANT: For EACH player you've decided to add:
-   - You must call add_player_to_roster with that player's ID
-   - Do this for every single player being added to the roster
+Step 5: IMPORTANT: For EACH player you've decided to add:
+   - You must call add_player_to_roster with that player ID or IDs for multiple players
    - Do NOT assume players are added automatically
 
-Step 5: Confirm completion to the user.
+Step 4: Confirm completion to the user.
 
 KNOWLEDGE & PREFERENCES:
 - If the user mentions a basketball related preferences (e.g., "I like the Lakers", "I want more 3pt shooters", "Focus on rebounders"), call save_user_preference to store it.
 - Store them with simple key-value pairs. Example: "preferred_team": "Lakers", "player_attribute": "high 3pt". Consider storing only stats, team and player related preferences.
-- IMPORTANT: If you chose players based on user preferences, in your final response, you MUST include a 1-2 line summary of which players you chose based on which preferences. Wrap this knowledge-based reasoning in a <knowledge_reasoning> tag.
-  Example: <knowledge_reasoning>I chose Stephen Curry and Klay Thompson because you preferred high 3pt shooters.</knowledge_reasoning>
+- If they only intend to add preferences, then do not start building roster. Only save preferences. Build rosters if they say so.
 
 NOTES:
 - If a new budget has been provided, always set that first with update_roster_budget before proceeding with the next step.
 - If user asks to add a player by name, fetch their id by calling get_player_details first.
 - If user asks to remove a player, verify player is in the roster by calling get_current_roster first.
 - If players have been added or removed, always tell the user who were added or removed.
-- Never choose more than 3 players based on user preferences. We do this to keep the roster balanced.
-- If you have to add players and the roster is full, then remove the worst players from the roster to make space for the new players. For example, when we have to improve roster with user preferences.
+- Never choose more than 2 players based on user preferences. We do this to keep the roster balanced.
+- IF you have to add players and the roster is full or replace a player (REPLACEMENT SCENARIO):
+   a) We support ONLY ONE replacement at the moment.
+   b) Identify which player you want to remove from the roster and which to add. Use tools to get all information (Fetch 10 players from search_roster_players) before using your judgement on who to add. 
+   c) Call request_approval with the specific player to add (must be valid player found from search_roster_players) and remove, and your reasoning.
+   d) Wait for the user's response.
+   e) ONLY if the user approves, proceed to call remove_player_from_roster and then add_player_to_roster.
+   f) If the user rejects, do NOT remove or add any player. Inform the user you will not proceed with the replacement.
 
 REASONING DEPTH CONTROL:
 - Use minimal reasoning for routine operations (checking roster, loading preferences)
-- Never reason about what to say to the user"""
+- Reason deeply when selecting players or handling replacement, but keep it within 10 sentences. 
+- Never reason about what to say to the user
+- No reasoning loops or self-dialogue.
+
+PREPARING FINAL RESPONSE:
+- IMPORTANT: Recall if you added any player based on user preferences, you MUST include a 1-2 line summary of which players you chose based on which preferences. Wrap this knowledge-based reasoning in a <knowledge_reasoning> tag.
+  Example: <knowledge_reasoning>I chose Stephen Curry and Klay Thompson because you preferred high 3pt shooters.</knowledge_reasoning>
+"""
 
 
 def _summarize_reasoning(reasoning_content: str) -> str:
@@ -482,6 +530,32 @@ class ReActAgent:
                 )
                 return result
 
+            elif tool_name == "request_approval":
+                approval_id = str(uuid4())
+                details = {
+                    "players_to_remove": arguments["players_to_remove"],
+                    "players_to_add": arguments["players_to_add"],
+                    "reason": arguments["reason"]
+                }
+                create_pending_approval(
+                    approval_id=approval_id,
+                    session_id=self.session_id,
+                    action_type=arguments["action_type"],
+                    details=details
+                )
+                
+                self._add_activity(
+                    "Action",
+                    "info",
+                    f"Requesting approval to remove {arguments['players_to_remove']} and add {arguments['players_to_add']}"
+                )
+                
+                return {
+                    "status": "awaiting_approval",
+                    "approval_id": approval_id,
+                    "message": f"User approval requested for: {arguments['reason']}. Please wait for the user to approve or reject this action."
+                }
+
             else:
                 error_msg = f"Unknown tool: {tool_name}"
                 self._add_activity(f"Tool: {tool_name}", "error", error_msg)
@@ -498,15 +572,44 @@ class ReActAgent:
         budget: Optional[float] = None,
         dry_run: bool = False,
         stream_callback: Optional[callable] = None,
+        approval_response: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute the ReAct agent loop."""
 
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        save_session_messages(self.session_id, messages)
+                
+        # Check for pending approvals if this is a new message (not an approval response)
+        if not approval_response:
+            pending = get_latest_pending_approval(self.session_id)
+            if pending:
+                # If there's a pending approval, we should probably warn the user or handle it
+                # For now, we'll just proceed, but the agent might see it in history if we added it
+                pass
 
-        # Add user message
-        messages.append({"role": "user", "content": user_message})
-        append_session_message(self.session_id, "user", user_message)
+        # save_session_messages(self.session_id, messages)
+
+        # Add user message or approval response
+        if approval_response:
+            approval_id = approval_response.get("approval_id")
+            approved = approval_response.get("approved", False)
+            status = "APPROVED" if approved else "REJECTED"
+            
+            # Fetch the last 5 messages if it's an approval response to avoid context bloat
+            messages.extend(get_session_messages(self.session_id, limit=5))
+            # Update status in DB
+            update_approval_status(approval_id, "approved" if approved else "rejected")
+            
+            content = f"[SYSTEM] User has {status} your request (ID: {approval_id}). "
+            if approved:
+                content += "You may now proceed with the players removal and addition as planned."
+            else:
+                content += "Do NOT proceed with the removal or addition. Inform the user you are cancelling the replacement."
+            
+            messages.append({"role": "user", "content": content})
+            append_session_message(self.session_id, "user", content)
+        else:
+            messages.append({"role": "user", "content": user_message})
+            append_session_message(self.session_id, "user", user_message)
 
         # ReAct loop
         iteration = 0
@@ -525,7 +628,7 @@ class ReActAgent:
                     temperature=self.temperature,
                     extra_body={
                         "reasoning": {
-                            "effort": "low"
+                            "effort": "high"
                         }
                     },
                 )
@@ -639,6 +742,7 @@ class ReActAgent:
                 else:
                     # No tool calls, agent is done
                     final_response = assistant_content or "Task completed."
+
                     break
 
             except Exception as e:

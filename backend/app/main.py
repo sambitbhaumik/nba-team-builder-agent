@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic.type_adapter import R
 
 from .agent import ReActAgent
-from .db import append_session_message, init_db, list_teams, query_preferences, save_team
+from .db import append_session_message, init_db, list_teams, query_preferences, save_team, clear_user_preferences
 from .knowledge import load_preferences, store_preference
 from .roster import PlayerValue
 from .schemas import (
@@ -126,9 +126,11 @@ def agent_execute(request: AgentExecuteRequest) -> AgentExecuteResponse:
 
 @app.get("/agent/stream")
 async def agent_stream(
-    goal: str,
+    goal: str | None = None,
     budget: float | None = None,
     session_id: str | None = None,
+    approval_id: str | None = None,
+    approved: bool | None = None,
 ) -> StreamingResponse:
     """Stream agent reasoning and actions in real-time."""
     import asyncio
@@ -157,12 +159,21 @@ async def agent_stream(
                 import concurrent.futures
                 loop = asyncio.get_event_loop()
                 
+                # Prepare approval response if provided
+                approval_response = None
+                if approval_id is not None and approved is not None:
+                    approval_response = {
+                        "approval_id": approval_id,
+                        "approved": approved
+                    }
+
                 def execute_sync() -> Dict[str, Any]:
                     return agent.execute(
-                        user_message=goal,
+                        user_message=goal or "",
                         budget=budget,
                         dry_run=False,
                         stream_callback=stream_callback,
+                        approval_response=approval_response,
                     )
                 
                 # Run in executor to avoid blocking
@@ -231,6 +242,12 @@ def knowledge_add(payload: KnowledgeAddRequest) -> dict:
 def knowledge_query() -> KnowledgeQueryResponse:
     items = query_preferences()
     return KnowledgeQueryResponse(items=items)
+
+
+@app.delete("/knowledge/preferences")
+def knowledge_clear() -> dict:
+    clear_user_preferences()
+    return {"status": "cleared"}
 
 
 @app.post("/teams/save")

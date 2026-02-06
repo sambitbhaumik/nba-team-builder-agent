@@ -59,6 +59,20 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pending_approvals (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                details_json TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'approved', 'rejected'
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            )
+            """
+        )
         conn.commit()
 
 
@@ -69,7 +83,7 @@ def _load_messages(messages_json: str) -> List[Dict[str, Any]]:
         return []
 
 
-def get_session_messages(session_id: str) -> List[Dict[str, Any]]:
+def get_session_messages(session_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
     with get_connection() as conn:
         row = conn.execute(
             "SELECT messages_json FROM sessions WHERE id = ?",
@@ -77,7 +91,10 @@ def get_session_messages(session_id: str) -> List[Dict[str, Any]]:
         ).fetchone()
         if not row:
             return []
-        return _load_messages(row["messages_json"])
+        messages = _load_messages(row["messages_json"])
+        if limit is not None:
+            return messages[-limit:] if len(messages) >= limit else messages
+        return messages
 
 
 def save_session_messages(session_id: str, messages: List[Dict[str, Any]]) -> None:
@@ -133,6 +150,13 @@ def query_preferences() -> List[Dict[str, str]]:
             "SELECT key, value FROM user_preferences"
         ).fetchall()
         return [dict[str, str](row) for row in rows]
+
+
+def clear_user_preferences() -> None:
+    """Clear all user preferences."""
+    with get_connection() as conn:
+        conn.execute("DELETE FROM user_preferences")
+        conn.commit()
 
 
 def save_team(
@@ -236,3 +260,67 @@ def clear_session_roster(session_id: str) -> None:
             (session_id,),
         )
         conn.commit()
+
+
+def create_pending_approval(
+    approval_id: str,
+    session_id: str,
+    action_type: str,
+    details: Dict[str, Any]
+) -> None:
+    """Create a new pending approval."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO pending_approvals (id, session_id, action_type, details_json, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'pending', ?, ?)
+            """,
+            (approval_id, session_id, action_type, json.dumps(details), now, now),
+        )
+        conn.commit()
+
+
+def get_pending_approval(approval_id: str) -> Optional[Dict[str, Any]]:
+    """Get a pending approval by ID."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM pending_approvals WHERE id = ?",
+            (approval_id,),
+        ).fetchone()
+        if not row:
+            return None
+        res = dict(row)
+        res["details"] = json.loads(res["details_json"])
+        return res
+
+
+def update_approval_status(approval_id: str, status: str) -> None:
+    """Update approval status."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE pending_approvals
+            SET status = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (status, now, approval_id),
+        )
+        conn.commit()
+
+
+def get_latest_pending_approval(session_id: str) -> Optional[Dict[str, Any]]:
+    """Get the latest pending approval for a session."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM pending_approvals WHERE session_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+            (session_id,),
+        ).fetchone()
+        if not row:
+            return None
+        res = dict(row)
+        res["details"] = json.loads(res["details_json"])
+        return res

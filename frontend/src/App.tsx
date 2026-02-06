@@ -81,6 +81,13 @@ type Message = {
   knowledgeHint?: string;
 };
 
+type PendingApproval = {
+  approval_id: string;
+  players_to_remove: string[];
+  players_to_add: string[];
+  reason: string;
+};
+
 
 const rosterTemplate: RosterSlot[] = [
   { id: "s1", label: "PG", group: "starter" },
@@ -116,6 +123,9 @@ export default function App() {
   const [pendingDelete, setPendingDelete] = useState<SavedTeam | null>(null);
   const [expandedTraces, setExpandedTraces] = useState<Record<string, boolean>>({});
   const [isRefreshingPlayers, setIsRefreshingPlayers] = useState(false);
+  const [isClearingPreferences, setIsClearingPreferences] = useState(false);
+  const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
+  const [isApprovalDialogOpen, setIsApprovalDialogOpen] = useState(false);
 
   const [leftWidth, setLeftWidth] = useState(50);
   const [rightPanelVisible, setRightPanelVisible] = useState(true);
@@ -198,16 +208,23 @@ export default function App() {
     }
   };
 
-  const handleSend = async () => {
-    if (!userInput.trim() || isLoading) return;
+  const handleSend = async (approval?: { approval_id: string; approved: boolean }) => {
+    if (!approval && (!userInput.trim() || isLoading)) return;
     
-    const userMsg: Message = { id: `u-${Date.now()}`, role: "user", content: userInput.trim() };
-    setMessages((prev) => [...prev, userMsg]);
-    setUserInput("");
+    if (!approval) {
+      const userMsg: Message = { id: `u-${Date.now()}`, role: "user", content: userInput.trim() };
+      setMessages((prev) => [...prev, userMsg]);
+      setUserInput("");
+    }
+    
     setIsLoading(true);
     
     try {
-      const response = await fetch(`http://localhost:8000/agent/stream?goal=${encodeURIComponent(userInput.trim())}&budget=${budgetTotal}&session_id=${sessionId}`);
+      const url = approval 
+        ? `http://localhost:8000/agent/stream?session_id=${sessionId}&approval_id=${approval.approval_id}&approved=${approval.approved}`
+        : `http://localhost:8000/agent/stream?goal=${encodeURIComponent(userInput.trim())}&budget=${budgetTotal}&session_id=${sessionId}`;
+      
+      const response = await fetch(url);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -220,6 +237,7 @@ export default function App() {
       let assistantMsgId = `a-${Date.now()}`;
       let fullContent = "";
       let trace: TraceStep[] = [];
+      let lastActionArgs: any = null;
       
       while (true) {
         const { done, value } = await reader.read();
@@ -258,6 +276,7 @@ export default function App() {
                 });
               } else if (data.type === "action") {
                 const isError = data.status === "error" || data.status === "fail";
+                lastActionArgs = data.arguments;
                 trace.push({
                   action: "Action",
                   status: isError ? "fail" : "pending",
@@ -322,6 +341,17 @@ export default function App() {
                       },
                     ];
                   });
+
+                  // Check if this observation is an approval request
+                  if (data.result?.status === "awaiting_approval" && lastActionArgs) {
+                    setPendingApproval({
+                      approval_id: data.result.approval_id,
+                      players_to_remove: lastActionArgs.players_to_remove,
+                      players_to_add: lastActionArgs.players_to_add,
+                      reason: lastActionArgs.reason,
+                    });
+                    setIsApprovalDialogOpen(true);
+                  }
                 }
               } else if (data.type === "roster_update") {
                 console.log("Real-time roster update:", data.players);
@@ -576,6 +606,32 @@ export default function App() {
     }
   };
 
+  const handleClearPreferences = async () => {
+    if (isClearingPreferences) return;
+    
+    if (!confirm("Are you sure you want to clear all user preferences? This cannot be undone.")) {
+      return;
+    }
+
+    setIsClearingPreferences(true);
+    try {
+      const response = await fetch("http://localhost:8000/knowledge/preferences", {
+        method: "DELETE",
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      alert("Successfully cleared all user preferences.");
+    } catch (error) {
+      console.error("Error clearing preferences:", error);
+      alert(`Error clearing preferences: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setIsClearingPreferences(false);
+    }
+  };
+
   const clearSession = () => {
     const newSessionId = `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     setSessionId(newSessionId);
@@ -588,6 +644,13 @@ export default function App() {
       },
     ]);
     setRoster(rosterTemplate);
+  };
+
+  const handleApproval = (approved: boolean) => {
+    if (!pendingApproval) return;
+    setIsApprovalDialogOpen(false);
+    handleSend({ approval_id: pendingApproval.approval_id, approved });
+    setPendingApproval(null);
   };
 
   return (
@@ -612,6 +675,15 @@ export default function App() {
               className="text-xs"
             >
               Clear Session
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleClearPreferences}
+              disabled={isClearingPreferences}
+              className="text-xs"
+            >
+              {isClearingPreferences ? "Clearing..." : "Clear Preferences"}
             </Button>
             <Button
               variant="outline"
@@ -732,7 +804,7 @@ export default function App() {
             />
             <Button 
               size="icon" 
-              onClick={handleSend}
+              onClick={() => handleSend()}
               className="rounded-2xl"
               disabled={isLoading}
             >
@@ -766,6 +838,53 @@ export default function App() {
       {/* RIGHT: Roster + Artifacts */}
       {rightPanelVisible && (
         <section className="flex flex-1 flex-col overflow-hidden bg-background">
+          {/* Approval Dialog */}
+          <Dialog open={isApprovalDialogOpen} onOpenChange={setIsApprovalDialogOpen}>
+            <DialogContent className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle>Approve Roster Change?</DialogTitle>
+                <DialogDescription>
+                  The agent wants to modify your roster to improve it.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="py-4 space-y-4">
+                <div className="rounded-md bg-muted p-3 text-sm italic">
+                  "{pendingApproval?.reason}"
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-destructive uppercase tracking-wider">Removing</p>
+                    <div className="space-y-1">
+                      {pendingApproval?.players_to_remove.map((p, i) => (
+                        <div key={i} className="text-sm font-medium flex items-center gap-2">
+                          <Trash2 className="h-3 w-3" /> {p}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-green-600 uppercase tracking-wider">Adding</p>
+                    <div className="space-y-1">
+                      {pendingApproval?.players_to_add.map((p, i) => (
+                        <div key={i} className="text-sm font-medium flex items-center gap-2">
+                          <WandSparkles className="h-3 w-3" /> {p}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => handleApproval(false)}>
+                  Reject
+                </Button>
+                <Button onClick={() => handleApproval(true)}>
+                  Approve Change
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           <header className="flex items-center justify-between border-b border-border px-5 py-4">
             <div>
               <h2 className="font-semibold">Roster Builder</h2>
