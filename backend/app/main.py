@@ -65,64 +65,64 @@ def on_startup() -> None:
 def health() -> dict:
     return {"status": "ok"}
 
-
-@app.post("/agent/execute", response_model=AgentExecuteResponse)
-def agent_execute(request: AgentExecuteRequest) -> AgentExecuteResponse:
-    """Execute the ReAct agent with the given goal."""
-    # Generate or use provided session_id
-    session_id = request.session_id or str(uuid4())
+# Non-streaming agent execution endpoint
+# @app.post("/agent/execute", response_model=AgentExecuteResponse)
+# def agent_execute(request: AgentExecuteRequest) -> AgentExecuteResponse:
+#     """Execute the ReAct agent with the given goal."""
+#     # Generate or use provided session_id
+#     session_id = request.session_id or str(uuid4())
     
-    # Create agent instance
-    agent = ReActAgent(session_id=session_id)
+#     # Create agent instance
+#     agent = ReActAgent(session_id=session_id)
     
-    # Execute agent
-    result = agent.execute(
-        user_message=request.goal,
-        budget=request.budget,
-        dry_run=request.dry_run,
-    )
+#     # Execute agent
+#     result = agent.execute(
+#         user_message=request.goal,
+#         budget=request.budget,
+#         dry_run=request.dry_run,
+#     )
     
-    # Convert roster to RosterResult format
-    roster_result = None
-    if result.get("roster") and result["roster"].get("players"):
-        players = [
-            PlayerStat(
-                name=p.get("name", ""),
-                player_id=p.get("player_id", 0),
-                team=p.get("team"),
-                position=p.get("position"),
-                stats=p.get("stats", {}),
-                fpg=p.get("fpg", 0.0),
-                dollar_value=p.get("dollar_value", 0.0),
-                score=p.get("score", 0.0),
-            )
-            for p in result["roster"]["players"]
-        ]
-        roster_result = RosterResult(
-            players=players,
-            total_cost=result["roster"].get("total_cost", 0.0),
-            budget=result["roster"].get("budget", 200.0),
-        )
+#     # Convert roster to RosterResult format
+#     roster_result = None
+#     if result.get("roster") and result["roster"].get("players"):
+#         players = [
+#             PlayerStat(
+#                 name=p.get("name", ""),
+#                 player_id=p.get("player_id", 0),
+#                 team=p.get("team"),
+#                 position=p.get("position"),
+#                 stats=p.get("stats", {}),
+#                 fpg=p.get("fpg", 0.0),
+#                 dollar_value=p.get("dollar_value", 0.0),
+#                 score=p.get("score", 0.0),
+#             )
+#             for p in result["roster"]["players"]
+#         ]
+#         roster_result = RosterResult(
+#             players=players,
+#             total_cost=result["roster"].get("total_cost", 0.0),
+#             budget=result["roster"].get("budget", 200.0),
+#         )
     
-    # Convert activity log to AgentActivity format
-    activity_log = [
-        AgentActivity(
-            step=activity.get("step", ""),
-            status=activity.get("status", ""),
-            detail=activity.get("detail", ""),
-        )
-        for activity in result.get("activity_log", [])
-    ]
+#     # Convert activity log to AgentActivity format
+#     activity_log = [
+#         AgentActivity(
+#             step=activity.get("step", ""),
+#             status=activity.get("status", ""),
+#             detail=activity.get("detail", ""),
+#         )
+#         for activity in result.get("activity_log", [])
+#     ]
     
-    return AgentExecuteResponse(
-        session_id=result["session_id"],
-        plan=result.get("plan", []),
-        activity_log=activity_log,
-        roster=roster_result,
-        report_path=result.get("report_path"),
-        knowledge_used=result.get("knowledge_used", []),
-        message=result.get("message", ""),
-    )
+#     return AgentExecuteResponse(
+#         session_id=result["session_id"],
+#         plan=result.get("plan", []),
+#         activity_log=activity_log,
+#         roster=roster_result,
+#         report_path=result.get("report_path"),
+#         knowledge_used=result.get("knowledge_used", []),
+#         message=result.get("message", ""),
+#     )
 
 
 @app.get("/agent/stream")
