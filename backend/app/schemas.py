@@ -64,6 +64,10 @@ class TeamSaveRequest(BaseModel):
     confirm: bool = False
 
 
+class TeamLoadRequest(BaseModel):
+    session_id: str
+    team_id: str
+
 class TeamListResponse(BaseModel):
     items: List[Dict[str, Any]]
 

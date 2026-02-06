@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic.type_adapter import R
 
 from .agent import ReActAgent
-from .db import append_session_message, init_db, list_teams, query_preferences, save_team, clear_user_preferences
+from .db import append_session_message, init_db, list_teams, query_preferences, save_team, clear_user_preferences, get_connection as init_db_conn
 from .knowledge import load_preferences, store_preference
 from .roster import PlayerValue
 from .schemas import (
@@ -30,6 +30,7 @@ from .schemas import (
     RosterPlayer,
     RosterResult,
     TeamListResponse,
+    TeamLoadRequest,
     TeamSaveRequest,
     UpdateBudgetRequest,
 )
@@ -271,6 +272,27 @@ def teams_list() -> TeamListResponse:
     return TeamListResponse(items=list_teams())
 
 
+@app.post("/teams/load")
+def teams_load(payload: TeamLoadRequest) -> dict:
+    """Load a saved team into the current session roster."""
+    with init_db_conn() as conn:
+        row = conn.execute(
+            "SELECT roster_json, budget FROM teams WHERE id = ?",
+            (payload.team_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Team not found")
+        
+        roster_data = json.loads(row["roster_json"])
+        players = roster_data.get("players", [])
+        budget = row["budget"]
+        
+        from .db import update_session_roster
+        update_session_roster(payload.session_id, players, budget)
+        
+    return {"status": "loaded", "session_id": payload.session_id}
+
+
 # API endpoints for core tool functions (can be enhanced with LLM agents)
 @app.post("/tools/fetch-player-stats", response_model=FetchPlayerStatsResponse)
 def api_fetch_player_stats() -> FetchPlayerStatsResponse:
@@ -318,107 +340,6 @@ def api_get_cached_player_stats() -> FetchPlayerStatsResponse:
         players=player_profiles,
         stats_by_id=stats_by_id,
     )
-
-
-# @app.post("/tools/calculate-values", response_model=CalculateValuesResponse)
-# def api_calculate_values(request: CalculateValuesRequest) -> CalculateValuesResponse:
-#     """
-#     Calculate fantasy values for players based on stats and preferences.
-#     Uses cached player stats if players/stats_by_id are not provided.
-#     """
-#     from .nba import PlayerProfile
-#     
-#     # Use cached data if players/stats not provided
-#     if request.players is None or request.stats_by_id is None:
-#         players, stats_by_id = tool_get_cached_player_stats()
-#         if not players:
-#             raise HTTPException(
-#                 status_code=404,
-#                 detail="No cached player data available. Please refresh player stats first using /tools/fetch-player-stats"
-#             )
-#     else:
-#         # Convert PlayerProfileResponse back to PlayerProfile
-#         players = [
-#             PlayerProfile(
-#                 player_id=p.player_id,
-#                 full_name=p.full_name,
-#                 team=p.team,
-#                 position=p.position,
-#             )
-#             for p in request.players
-#         ]
-#         stats_by_id = request.stats_by_id
-#     
-#     valued_players = tool_calculate_values(
-#         players,
-#         stats_by_id,
-#         request.preferences,
-#         request.budget,
-#     )
-#     
-#     player_values = [
-#         PlayerValueResponse(
-#             player_id=p.player_id,
-#             name=p.name,
-#             team=p.team,
-#             position=p.position,
-#             stats=p.stats,
-#             fpg=p.fpg,
-#             dollar_value=p.dollar_value,
-#             score=p.score,
-#         )
-#         for p in valued_players
-#     ]
-#     
-#     return CalculateValuesResponse(valued_players=player_values)
-
-
-# @app.post("/tools/optimize-roster-from-values", response_model=OptimizeRosterFromValuesResponse)
-# def api_optimize_roster_from_values(request: OptimizeRosterFromValuesRequest) -> OptimizeRosterFromValuesResponse:
-#     """
-#     Optimize roster from a list of valued players.
-#     This can be enhanced with LLM agent capabilities for intelligent roster optimization.
-#     """
-#     # Convert PlayerValueResponse back to PlayerValue
-#     player_values = [
-#         PlayerValue(
-#             player_id=p.player_id,
-#             name=p.name,
-#             team=p.team,
-#             position=p.position,
-#             stats=p.stats,
-#             fpg=p.fpg,
-#             dollar_value=p.dollar_value,
-#             score=p.score,
-#         )
-#         for p in request.players
-#     ]
-#     
-#     optimized_roster, total_cost = tool_optimize_roster(
-#         player_values,
-#         request.budget,
-#         request.slots,
-#     )
-#     
-#     optimized_player_values = [
-#         PlayerValueResponse(
-#             player_id=p.player_id,
-#             name=p.name,
-#             team=p.team,
-#             position=p.position,
-#             stats=p.stats,
-#             fpg=p.fpg,
-#             dollar_value=p.dollar_value,
-#             score=p.score,
-#         )
-#         for p in optimized_roster
-#     ]
-#     
-#     return OptimizeRosterFromValuesResponse(
-#         optimized_roster=optimized_player_values,
-#         total_cost=total_cost,
-#     )
-
 
 @app.post("/tools/generate-report", response_model=GenerateReportResponse)
 def api_generate_report_from_values(request: GenerateReportRequest) -> GenerateReportResponse:

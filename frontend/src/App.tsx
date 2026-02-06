@@ -65,6 +65,7 @@ type SavedTeam = {
   createdAt: string;
   budgetUsed: number;
   roster: RosterSlot[];
+  players?: any[];
 };
 
 type TraceStep = {
@@ -115,10 +116,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [players, setPlayers] = useState<Player[]>([]);
   const [placingSlots, setPlacingSlots] = useState<string[]>([]);
-  const [savedTeams, setSavedTeams] = useState<SavedTeam[]>([
-    { id: "team-1", name: "Defensive Anchors", createdAt: "2026-01-28 18:21", budgetUsed: 142.5, roster: rosterTemplate },
-    { id: "team-2", name: "3PT Storm", createdAt: "2026-01-24 20:14", budgetUsed: 148.9, roster: rosterTemplate },
-  ]);
+  const [savedTeams, setSavedTeams] = useState<SavedTeam[]>([]);
   const [teamName, setTeamName] = useState("My Team");
   const [pendingDelete, setPendingDelete] = useState<SavedTeam | null>(null);
   const [expandedTraces, setExpandedTraces] = useState<Record<string, boolean>>({});
@@ -126,6 +124,8 @@ export default function App() {
   const [isClearingPreferences, setIsClearingPreferences] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [isApprovalDialogOpen, setIsApprovalDialogOpen] = useState(false);
+  const [isLoadConfirmOpen, setIsLoadConfirmOpen] = useState(false);
+  const [teamToLoad, setTeamToLoad] = useState<SavedTeam | null>(null);
 
   const [leftWidth, setLeftWidth] = useState(50);
   const [rightPanelVisible, setRightPanelVisible] = useState(true);
@@ -468,23 +468,113 @@ export default function App() {
     setTimeout(() => setPlacingSlots([]), 800);
   };
 
-  const saveRoster = () => {
-    const newTeam: SavedTeam = {
-      id: `team-${Date.now()}`,
-      name: teamName || "Untitled",
-      createdAt: new Date().toLocaleString(),
-      budgetUsed,
-      roster,
-    };
-    setSavedTeams((prev) => [newTeam, ...prev]);
+  const saveRoster = async () => {
+    try {
+      const response = await fetch("http://localhost:8000/teams/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: teamName || "Untitled",
+          roster: { players: rosterPlayers.map(p => ({
+            player_id: parseInt(p.id.replace("temp-", "")),
+            name: p.name,
+            team: p.team,
+            position: p.position,
+            fpg: p.fpg,
+            dollar_value: p.value,
+            starter: p.starter
+          })) },
+          budget: budgetTotal,
+          total_cost: budgetUsed,
+          confirm: true
+        }),
+      });
+      if (response.ok) {
+        fetchSavedTeams();
+      }
+    } catch (error) {
+      console.error("Error saving roster:", error);
+    }
   };
+
+  const fetchSavedTeams = async () => {
+    try {
+      const response = await fetch("http://localhost:8000/teams");
+      if (response.ok) {
+        const data = await response.json();
+        const mappedTeams: SavedTeam[] = data.items.map((item: any) => {
+          const rosterData = JSON.parse(item.roster_json);
+          // We need to reconstruct the roster slots from the saved players
+          const reconstructedRoster = [...rosterTemplate].map(slot => ({ ...slot }));
+          const teamPlayers = rosterData.players || [];
+          
+          // This is a bit tricky because we don't have the full player objects here
+          // but we can create temporary ones like in updateRosterFromBackend
+          teamPlayers.forEach((p: any, idx: number) => {
+            if (idx < reconstructedRoster.length) {
+              reconstructedRoster[idx].playerId = `temp-${p.player_id || idx}`;
+            }
+          });
+
+          return {
+            id: item.id,
+            name: item.name,
+            createdAt: new Date(item.created_at).toLocaleString(),
+            budgetUsed: item.total_cost,
+            roster: reconstructedRoster,
+            // Store the players too so we can load them properly
+            players: teamPlayers
+          };
+        });
+        setSavedTeams(mappedTeams);
+      }
+    } catch (error) {
+      console.error("Error fetching saved teams:", error);
+    }
+  };
+
+  useEffect(() => {
+    fetchSavedTeams();
+  }, []);
 
   const deleteTeam = (team: SavedTeam) => {
     setSavedTeams((prev) => prev.filter((t) => t.id !== team.id));
     setPendingDelete(null);
   };
 
-  const loadTeam = (team: SavedTeam) => setRoster(team.roster);
+  const loadTeam = async (team: SavedTeam) => {
+    if (rosterPlayers.length > 0) {
+      setTeamToLoad(team);
+      setIsLoadConfirmOpen(true);
+      return;
+    }
+    await executeLoadTeam(team);
+  };
+
+  const executeLoadTeam = async (team: SavedTeam) => {
+    try {
+      const response = await fetch("http://localhost:8000/teams/load", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          team_id: team.id
+        }),
+      });
+      
+      if (response.ok) {
+        if (team.players) {
+          updateRosterFromBackend(team.players);
+        } else {
+          setRoster(team.roster);
+        }
+        setIsLoadConfirmOpen(false);
+        setTeamToLoad(null);
+      }
+    } catch (error) {
+      console.error("Error loading team:", error);
+    }
+  };
 
   const downloadCsv = () => {
     const rows = [
@@ -558,23 +648,23 @@ export default function App() {
     setSelectedSlotId(selectedSlotId === slotId ? null : slotId);
   };
 
-  const handleReplacePlayer = (slotId: string) => {
+  const handleRemovePlayer = async (slotId: string) => {
     const slot = roster.find((s) => s.id === slotId);
-    if (slot?.playerId) {
+    if (slot?.playerId && sessionId) {
       const player = playerById[slot.playerId];
       if (player) {
-        setUserInput(`replace ${player.name}`);
-        setSelectedSlotId(null);
-        // Focus the chat input
-        setTimeout(() => {
-          const textarea = document.querySelector('textarea[placeholder*="Build me a team"]') as HTMLTextAreaElement;
-          textarea?.focus();
-        }, 0);
+        try {
+          const response = await fetch(`http://localhost:8000/roster/${sessionId}/players/${encodeURIComponent(player.name)}`, {
+            method: "DELETE",
+          });
+          if (!response.ok) {
+            console.error("Failed to remove player from backend roster");
+          }
+        } catch (error) {
+          console.error("Error removing player from backend roster:", error);
+        }
       }
     }
-  };
-
-  const handleRemovePlayer = (slotId: string) => {
     setRoster((prev) => prev.map((s) => (s.id === slotId ? { ...s, playerId: undefined } : s)));
     setSelectedSlotId(null);
   };
@@ -902,7 +992,7 @@ export default function App() {
                     <DialogTitle>Save roster?</DialogTitle>
                     <DialogDescription>Give your roster a name.</DialogDescription>
                   </DialogHeader>
-                  <Input value={teamName} onChange={(e) => setTeamName(e.target.value)} />
+                  <Input value={teamName} onChange={(e) => setTeamName(e.target.value)} className="mb-4" />
                   <DialogFooter>
                     <DialogClose asChild>
                       <Button variant="secondary">Cancel</Button>
@@ -983,13 +1073,6 @@ export default function App() {
                             className="absolute top-full left-0 mt-1 z-50 min-w-[140px] rounded-md border bg-popover shadow-md p-1"
                           >
                             <button
-                              onClick={() => handleReplacePlayer(slot.id)}
-                              className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-accent hover:text-accent-foreground transition-colors"
-                            >
-                              <WandSparkles className="h-3.5 w-3.5" />
-                              Replace
-                            </button>
-                            <button
                               onClick={() => handleRemovePlayer(slot.id)}
                               className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-accent hover:text-accent-foreground transition-colors text-destructive"
                             >
@@ -1054,13 +1137,6 @@ export default function App() {
                             ref={menuRef}
                             className="absolute top-full left-0 mt-1 z-50 min-w-[140px] rounded-md border bg-popover shadow-md p-1"
                           >
-                            <button
-                              onClick={() => handleReplacePlayer(slot.id)}
-                              className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-accent hover:text-accent-foreground transition-colors"
-                            >
-                              <WandSparkles className="h-3.5 w-3.5" />
-                              Replace
-                            </button>
                             <button
                               onClick={() => handleRemovePlayer(slot.id)}
                               className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-sm hover:bg-accent hover:text-accent-foreground transition-colors text-destructive"
@@ -1142,6 +1218,26 @@ export default function App() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Load Confirmation Dialog */}
+          <Dialog open={isLoadConfirmOpen} onOpenChange={setIsLoadConfirmOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Replace current roster?</DialogTitle>
+                <DialogDescription>
+                  Loading "{teamToLoad?.name}" will replace all players in your current session.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="secondary" onClick={() => setIsLoadConfirmOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={() => teamToLoad && executeLoadTeam(teamToLoad)}>
+                  Replace Roster
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </section>
       )}
     </div>
