@@ -2,8 +2,41 @@
 
 A full-stack application for building and managing NBA fantasy rosters using intelligent AI agents. 
 
-** More details as well as installation setup to be published
+## Quick Start (One-Command Run)
 
+To get the project up and running quickly, follow these steps:
+
+### 1. Setup
+Run the setup script to create a virtual environment, install Python dependencies, and install npm packages.
+
+**Windows (PowerShell):**
+```powershell
+.\setup.ps1
+```
+
+**macOS/Linux:**
+```bash
+chmod +x setup.sh run.sh
+./setup.sh
+```
+
+### 2. Run
+Start both the FastAPI backend and Vite frontend with a single command.
+
+**Windows (PowerShell):**
+```powershell
+.\run.ps1
+```
+
+**macOS/Linux:**
+```bash
+./run.sh
+```
+
+- **Frontend**: [http://localhost:5173](http://localhost:5173)
+- **Backend**: [http://localhost:8000](http://localhost:8000)
+
+---
 
 ## Tech Stack
 
