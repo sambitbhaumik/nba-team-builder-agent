@@ -49,7 +49,17 @@ type Player = {
   steals: number;
   threes: number;
   rebounds: number;
+  score: number;
   starter?: boolean;
+  pts: number;
+  reb: number;
+  ast: number;
+  stl: number;
+  blk: number;
+  tov: number;
+  fg_pct: number;
+  fg3_pct: number;
+  age: number;
 };
 
 type RosterSlot = {
@@ -441,7 +451,17 @@ export default function App() {
             steals: player.stats?.stl || 0,
             threes: player.stats?.fg3m || 0,
             rebounds: player.stats?.reb || 0,
+            score: player.score || 0,
             starter: player.starter,
+            pts: player.pts,
+            reb: player.reb,
+            ast: player.ast,
+            stl: player.stl,
+            blk: player.blk,
+            tov: player.tov,
+            fg_pct: player.fg_pct,
+            fg3_pct: player.fg3_pct,
+            age: player.age,
           };
           newPlayers.push(tempPlayer);
           existingPlayer = tempPlayer;
@@ -482,7 +502,17 @@ export default function App() {
             position: p.position,
             fpg: p.fpg,
             dollar_value: p.value,
-            starter: p.starter
+            score: p.score,
+            starter: p.starter,
+            pts: p.pts,
+            reb: p.reb,
+            ast: p.ast,
+            stl: p.stl,
+            blk: p.blk,
+            tov: p.tov,
+            fg_pct: p.fg_pct,
+            fg3_pct: p.fg3_pct,
+            age: p.age,
           })) },
           budget: budgetTotal,
           total_cost: budgetUsed,

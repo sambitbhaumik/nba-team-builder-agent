@@ -15,7 +15,7 @@ def test_llm():
     
     try:
         llm = ChatOpenAI(
-            model="nvidia/nemotron-3-nano-30b-a3b:free",
+            model="openai/gpt-oss-20b",
             temperature=0,
             openai_api_base="https://openrouter.ai/api/v1",
             openai_api_key=api_key,

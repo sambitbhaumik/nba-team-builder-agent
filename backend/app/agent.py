@@ -325,17 +325,25 @@ PREPARING FINAL RESPONSE:
 
 def _summarize_reasoning(reasoning_content: str) -> str:
     """Summarize agent reasoning_content into a 1-2 line summary using another model."""
+    if not reasoning_content:
+        return ""
     try:
         response = client.chat.completions.create(
-            model="liquid/lfm-2.5-1.2b-instruct:free",
+            model="openai/gpt-oss-20b",
             messages=[
                 {"role": "system", "content": "Summarize the following agent reasoning into a concise 1-2 line summary. Focus on the core intent and next steps."},
                 {"role": "user", "content": reasoning_content}
             ],
             temperature=0.3,
-            max_tokens=100
+            max_tokens=100,
+            extra_body={
+                "reasoning": {
+                    "effort": "low"
+                }
+            },
         )
-        return response.choices[0].message.content.strip()
+        content = response.choices[0].message.content
+        return content.strip() if content else ""
     except Exception as e:
         logger.error(f"Error summarizing reasoning: {e}")
         return reasoning_content[:200] + "..." # Fallback to truncated original
@@ -628,7 +636,7 @@ class ReActAgent:
                     temperature=self.temperature,
                     extra_body={
                         "reasoning": {
-                            "effort": "high"
+                            "effort": "medium"
                         }
                     },
                 )
